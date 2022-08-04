@@ -24,6 +24,9 @@ import moneyed
 import sentry_sdk
 from sentry_sdk.integrations.django import DjangoIntegration
 
+import ldap
+from django_auth_ldap.config import LDAPSearch
+
 from . import config
 from .config import get_boolean_setting, get_setting
 
@@ -770,6 +773,14 @@ MARKDOWNIFY = {
         ],
     }
 }
+
+AUTH_LDAP_BIND_DN = get_setting('AUTH_LDAP_BIND_DN', 'auth_ldap_bind_dn', '')
+AUTH_LDAP_BIND_PASSWORD = get_setting('AUTH_LDAP_BIND_PASSWORD', 'auth_ldap_bind_password', '')
+AUTH_LDAP_USER_SEARCH = LDAPSearch(
+    get_setting('AUTH_LDAP_BASE_DN', 'auth_ldap_base_dn', 'ou=users,dc=example,dc=com'),
+    ldap.SCOPE_SUBTREE,
+    '(uid=%(user)s)'
+)
 
 # sentry.io integration for error reporting
 SENTRY_ENABLED = get_boolean_setting('INVENTREE_SENTRY_ENABLED', 'sentry_enabled', False)
