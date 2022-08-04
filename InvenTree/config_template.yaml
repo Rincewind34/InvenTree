@@ -155,8 +155,9 @@ remote_login_enabled: False
 remote_login_header: REMOTE_USER
 
 # Permit custom authentication backends
-#authentication_backends:
-#  - 'django.contrib.auth.backends.ModelBackend'
+authentication_backends:
+  - 'django.contrib.auth.backends.ModelBackend'
+  - 'django_auth_ldap.backend.LDAPBackend'
 
 #  Custom middleware, sometimes needed alongside an authentication backend change.
 #middleware:

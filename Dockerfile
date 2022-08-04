@@ -79,6 +79,9 @@ RUN pip install --upgrade pip
 COPY ./docker/requirements.txt base_requirements.txt
 RUN pip install --disable-pip-version-check -U -r base_requirements.txt
 
+RUN apt-get -y install libsasl2-dev python-dev libldap2-dev libssl-dev
+RUN pip install django-auth-ldap
+
 # InvenTree production image:
 # - Copies required files from local directory
 # - Installs required python packages from requirements.txt
