@@ -4,16 +4,21 @@
     blankImage,
     deleteButton,
     editButton,
+    formatCurrency,
     formatDecimal,
+    formatPriceRange,
     imageHoverIcon,
     makeIconBadge,
     makeIconButton,
     makeProgressBar,
     renderLink,
+    sanitizeInputString,
     select2Thumbnail,
     setupNotesField,
+    shortenString,
     thumbnailImage
     yesNoLabel,
+    withTitle,
 */
 
 function yesNoLabel(value) {
@@ -32,6 +37,110 @@ function editButton(url, text='{% trans "Edit" %}') {
 
 function deleteButton(url, text='{% trans "Delete" %}') {
     return `<button class='btn btn-danger delete-button btn-sm' type='button' url='${url}'>${text}</button>`;
+}
+
+
+/*
+ * format currency (money) value based on current settings
+ *
+ * Options:
+ * - currency: Currency code (uses default value if none provided)
+ * - locale: Locale specified (uses default value if none provided)
+ * - digits: Maximum number of significant digits (default = 10)
+ */
+function formatCurrency(value, options={}) {
+
+    if (value == null) {
+        return null;
+    }
+
+    var digits = options.digits || global_settings.PRICING_DECIMAL_PLACES || 6;
+
+    // Strip out any trailing zeros, etc
+    value = formatDecimal(value, digits);
+
+    // Extract default currency information
+    var currency = options.currency || global_settings.INVENTREE_DEFAULT_CURRENCY || 'USD';
+
+    // Exctract locale information
+    var locale = options.locale || navigator.language || 'en-US';
+
+
+    var formatter = new Intl.NumberFormat(
+        locale,
+        {
+            style: 'currency',
+            currency: currency,
+            maximumSignificantDigits: digits,
+        }
+    );
+
+    return formatter.format(value);
+}
+
+
+/*
+ * Format a range of prices
+ */
+function formatPriceRange(price_min, price_max, options={}) {
+
+    var p_min = price_min || price_max;
+    var p_max = price_max || price_min;
+
+    var quantity = options.quantity || 1;
+
+    if (p_min == null && p_max == null) {
+        return null;
+    }
+
+    p_min = parseFloat(p_min) * quantity;
+    p_max = parseFloat(p_max) * quantity;
+
+    var output = '';
+
+    output += formatCurrency(p_min, options);
+
+    if (p_min != p_max) {
+        output += ' - ';
+        output += formatCurrency(p_max, options);
+    }
+
+    return output;
+}
+
+
+/*
+ * Ensure a string does not exceed a maximum length.
+ * Useful for displaying long strings in tables,
+ * to ensure a very long string does not "overflow" the table
+ */
+function shortenString(input_string, options={}) {
+
+    // Maximum length can be provided via options argument, or via a user-configurable setting
+    var max_length = options.max_length || user_settings.TABLE_STRING_MAX_LENGTH;
+
+    if (!max_length || !input_string) {
+        return input_string;
+    }
+
+    input_string = input_string.toString();
+
+    // Easy option: input string is already short enough
+    if (input_string.length <= max_length) {
+        return input_string;
+    }
+
+    var N = Math.floor(max_length / 2 - 1);
+
+    var output_string = input_string.slice(0, N) + '...' + input_string.slice(-N);
+
+    return output_string;
+}
+
+
+function withTitle(html, title, options={}) {
+
+    return `<div title='${title}'>${html}</div>`;
 }
 
 
@@ -147,14 +256,14 @@ function makeProgressBar(value, maximum, opts={}) {
 
     var options = opts || {};
 
-    value = parseFloat(value);
+    value = formatDecimal(parseFloat(value));
 
     var percent = 100;
 
     // Prevent div-by-zero or null value
     if (maximum && maximum > 0) {
-        maximum = parseFloat(maximum);
-        percent = parseInt(value / maximum * 100);
+        maximum = formatDecimal(parseFloat(maximum));
+        percent = formatDecimal(parseInt(value / maximum * 100));
     }
 
     if (percent > 100) {
@@ -213,24 +322,29 @@ function makeProgressBar(value, maximum, opts={}) {
 }
 
 
+/*
+ * Render a URL for display
+ */
 function renderLink(text, url, options={}) {
     if (url === null || url === undefined || url === '') {
         return text;
     }
 
-    var max_length = options.max_length || -1;
+    var max_length = options.max_length || 0;
 
-    // Shorten the displayed length if required
-    if ((max_length > 0) && (text.length > max_length)) {
-        var slice_length = (max_length - 3) / 2;
-
-        var text_start = text.slice(0, slice_length);
-        var text_end = text.slice(-slice_length);
-
-        text = `${text_start}...${text_end}`;
+    if (max_length > 0) {
+        text = shortenString(text, {
+            max_length: max_length,
+        });
     }
 
-    return `<a href="${url}">${text}</a>`;
+    var extras = '';
+
+    if (options.tooltip != false) {
+        extras += ` title="${url}"`;
+    }
+
+    return `<a href="${url}" ${extras}>${text}</a>`;
 }
 
 
@@ -325,4 +439,29 @@ function setupNotesField(element, url, options={}) {
             });
         });
     }
+}
+
+
+/*
+ * Sanitize a string provided by the user from an input field,
+ * e.g. data form or search box
+ *
+ * - Remove leading / trailing whitespace
+ * - Remove hidden control characters
+ */
+function sanitizeInputString(s, options={}) {
+
+    if (!s) {
+        return s;
+    }
+
+    // Remove ASCII control characters
+    s = s.replace(/[\x01-\x1F]+/g, '');
+
+    // Remove Unicode control characters
+    s = s.replace(/[\p{C}]+/gu, '');
+
+    s = s.trim();
+
+    return s;
 }

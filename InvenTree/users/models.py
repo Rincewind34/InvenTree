@@ -76,6 +76,7 @@ class RuleSet(models.Model):
             'plugin_pluginconfig',
             'plugin_pluginsetting',
             'plugin_notificationusersetting',
+            'common_newsfeedentry',
         ],
         'part_category': [
             'part_partcategory',
@@ -84,6 +85,7 @@ class RuleSet(models.Model):
         ],
         'part': [
             'part_part',
+            'part_partpricing',
             'part_bomitem',
             'part_bomitemsubstitute',
             'part_partattachment',
@@ -127,14 +129,15 @@ class RuleSet(models.Model):
         ],
         'purchase_order': [
             'company_company',
+            'company_manufacturerpart',
+            'company_manufacturerpartparameter',
+            'company_supplierpart',
             'company_supplierpricebreak',
             'order_purchaseorder',
             'order_purchaseorderattachment',
             'order_purchaseorderlineitem',
             'order_purchaseorderextraline',
-            'company_supplierpart',
-            'company_manufacturerpart',
-            'company_manufacturerpartparameter',
+            'report_purchaseorderreport',
         ],
         'sales_order': [
             'company_company',
@@ -144,6 +147,7 @@ class RuleSet(models.Model):
             'order_salesorderlineitem',
             'order_salesorderextraline',
             'order_salesordershipment',
+            'report_salesorderreport',
         ]
     }
 

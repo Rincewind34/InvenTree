@@ -118,7 +118,7 @@ class CategoryTest(TestCase):
         self.assertTrue(len(child.path), 26)
         self.assertEqual(
             child.pathstring,
-            "Cat/AAAAAAAAAA/BBBBBBBBBB/CCCCCCCCCC/DDDDDDDDDD/EEEEEEEEEE/FFFFFFFFFF/GGGGGGGGGG/HHHHHHHHHH/IIIIIIIIII/JJJJJJJJJJ/.../OOOOOOOOOO/PPPPPPPPPP/QQQQQQQQQQ/RRRRRRRRRR/SSSSSSSSSS/TTTTTTTTTT/UUUUUUUUUU/VVVVVVVVVV/WWWWWWWWWW/XXXXXXXXXX/YYYYYYYYYY/ZZZZZZZZZZ"
+            "Cat/AAAAAAAAAA/BBBBBBBBBB/CCCCCCCCCC/DDDDDDDDDD/EEEEEEEEEE/FFFFFFFFFF/GGGGGGGGGG/HHHHHHHHHH/IIIIIIIIII/JJJJJJJJJJ/KKKKKKKKK...OO/PPPPPPPPPP/QQQQQQQQQQ/RRRRRRRRRR/SSSSSSSSSS/TTTTTTTTTT/UUUUUUUUUU/VVVVVVVVVV/WWWWWWWWWW/XXXXXXXXXX/YYYYYYYYYY/ZZZZZZZZZZ"
         )
         self.assertTrue(len(child.pathstring) <= 250)
 
@@ -148,7 +148,7 @@ class CategoryTest(TestCase):
     def test_parameters(self):
         """Test that the Category parameters are correctly fetched."""
         # Check number of SQL queries to iterate other parameters
-        with self.assertNumQueries(7):
+        with self.assertNumQueries(8):
             # Prefetch: 3 queries (parts, parameters and parameters_template)
             fasteners = self.fasteners.prefetch_parts_parameters()
             # Iterate through all parts and parameters

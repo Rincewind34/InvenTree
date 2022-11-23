@@ -5,7 +5,7 @@ import os
 
 from django import template
 from django.conf import settings
-from django.utils.safestring import mark_safe
+from django.utils.safestring import SafeString, mark_safe
 
 import InvenTree.helpers
 from common.models import InvenTreeSetting
@@ -19,6 +19,20 @@ logger = logging.getLogger('inventree')
 
 
 @register.simple_tag()
+def getkey(value: dict, arg):
+    """Perform key lookup in the provided dict object.
+
+    This function is provided to get around template rendering limitations.
+    Ref: https://stackoverflow.com/questions/1906129/dict-keys-with-spaces-in-django-templates
+
+    Arguments:
+        value: A python dict object
+        arg: The 'key' to be found within the dict
+    """
+    return value[arg]
+
+
+@register.simple_tag()
 def asset(filename):
     """Return fully-qualified path for an upload report asset file.
 
@@ -28,11 +42,15 @@ def asset(filename):
     Raises:
         FileNotFoundError if file does not exist
     """
+    if type(filename) is SafeString:
+        # Prepend an empty string to enforce 'stringiness'
+        filename = '' + filename
+
     # If in debug mode, return URL to the image, not a local file
     debug_mode = InvenTreeSetting.get_setting('REPORT_DEBUG_MODE')
 
     # Test if the file actually exists
-    full_path = settings.MEDIA_ROOT.joinpath('report', 'assets', filename)
+    full_path = settings.MEDIA_ROOT.joinpath('report', 'assets', filename).resolve()
 
     if not full_path.exists() or not full_path.is_file():
         raise FileNotFoundError(f"Asset file '{filename}' does not exist")
@@ -54,6 +72,10 @@ def uploaded_image(filename, replace_missing=True, replacement_file='blank_image
     Returns:
         A fully qualified path to the image
     """
+
+    if type(filename) is SafeString:
+        # Prepend an empty string to enforce 'stringiness'
+        filename = '' + filename
 
     # If in debug mode, return URL to the image, not a local file
     debug_mode = InvenTreeSetting.get_setting('REPORT_DEBUG_MODE')

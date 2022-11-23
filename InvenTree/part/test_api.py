@@ -1,5 +1,10 @@
 """Unit tests for the various part API endpoints"""
 
+from decimal import Decimal
+from enum import IntEnum
+from random import randint
+
+from django.core.exceptions import ValidationError
 from django.urls import reverse
 
 import PIL
@@ -9,7 +14,7 @@ from rest_framework.test import APIClient
 import build.models
 import order.models
 from common.models import InvenTreeSetting
-from company.models import Company
+from company.models import Company, SupplierPart
 from InvenTree.api_tester import InvenTreeAPITestCase
 from InvenTree.status_codes import (BuildStatus, PurchaseOrderStatus,
                                     StockStatus)
@@ -49,33 +54,36 @@ class PartCategoryAPITest(InvenTreeAPITestCase):
         """Test the PartCategoryList API endpoint"""
         url = reverse('api-part-category-list')
 
-        response = self.get(url, expected_code=200)
+        # star categories manually for tests as it is not possible with fixures
+        # because the current user is no fixure itself and throws an invalid
+        # foreign key constrain
+        for pk in [3, 4]:
+            PartCategory.objects.get(pk=pk).set_starred(self.user, True)
 
-        self.assertEqual(len(response.data), 8)
+        test_cases = [
+            ({}, 8, 'no parameters'),
+            ({'parent': 1, 'cascade': False}, 3, 'Filter by parent, no cascading'),
+            ({'parent': 1, 'cascade': True}, 5, 'Filter by parent, cascading'),
+            ({'cascade': True, 'depth': 0}, 8, 'Cascade with no parent, depth=0'),
+            ({'cascade': False, 'depth': 10}, 8, 'Cascade with no parent, depth=0'),
+            ({'parent': 'null', 'cascade': True, 'depth': 0}, 2, 'Cascade with null parent, depth=0'),
+            ({'parent': 'null', 'cascade': True, 'depth': 10}, 8, 'Cascade with null parent and bigger depth'),
+            ({'parent': 'null', 'cascade': False, 'depth': 10}, 2, 'No cascade even with depth specified with null parent'),
+            ({'parent': 1, 'cascade': False, 'depth': 0}, 3, 'Dont cascade with depth=0 and parent'),
+            ({'parent': 1, 'cascade': True, 'depth': 0}, 3, 'Cascade with depth=0 and parent'),
+            ({'parent': 1, 'cascade': False, 'depth': 1}, 3, 'Dont cascade even with depth=1 specified with parent'),
+            ({'parent': 1, 'cascade': True, 'depth': 1}, 5, 'Cascade with depth=1 with parent'),
+            ({'parent': 1, 'cascade': True, 'depth': 'abcdefg'}, 5, 'Cascade with invalid depth and parent'),
+            ({'parent': 42}, 8, 'Should return everything if parent_pk is not vaild'),
+            ({'parent': 'null', 'exclude_tree': 1, 'cascade': True}, 2, 'Should return everything from except tree with pk=1'),
+            ({'parent': 'null', 'exclude_tree': 42, 'cascade': True}, 8, 'Should return everything because exclude_tree=42 is no valid pk'),
+            ({'parent': 1, 'starred': True, 'cascade': True}, 2, 'Should return the starred categories for the current user within the pk=1 tree'),
+            ({'parent': 1, 'starred': False, 'cascade': True}, 3, 'Should return the not starred categories for the current user within the pk=1 tree'),
+        ]
 
-        # Filter by parent, depth=1
-        response = self.get(
-            url,
-            {
-                'parent': 1,
-                'cascade': False,
-            },
-            expected_code=200
-        )
-
-        self.assertEqual(len(response.data), 3)
-
-        # Filter by parent, cascading
-        response = self.get(
-            url,
-            {
-                'parent': 1,
-                'cascade': True,
-            },
-            expected_code=200,
-        )
-
-        self.assertEqual(len(response.data), 5)
+        for params, res_len, description in test_cases:
+            response = self.get(url, params, expected_code=200)
+            self.assertEqual(len(response.data), res_len, description)
 
         # Check that the required fields are present
         fields = [
@@ -90,9 +98,10 @@ class PartCategoryAPITest(InvenTreeAPITestCase):
             'url'
         ]
 
+        response = self.get(url, expected_code=200)
         for result in response.data:
             for f in fields:
-                self.assertIn(f, result)
+                self.assertIn(f, result, f'"{f}" is missing in result of PartCategory list')
 
     def test_part_count(self):
         """Test that the 'part_count' field is annotated correctly"""
@@ -219,35 +228,234 @@ class PartCategoryAPITest(InvenTreeAPITestCase):
         self.assertEqual(PartCategoryParameterTemplate.objects.count(), 0)
 
     def test_bleach(self):
-        """Test that the data cleaning functionality is working"""
+        """Test that the data cleaning functionality is working.
+
+        This helps to protect against XSS injection
+        """
 
         url = reverse('api-part-category-detail', kwargs={'pk': 1})
 
-        self.patch(
-            url,
-            {
-                'description': '<img src=# onerror=alert("pwned")>',
-            },
-            expected_code=200
+        # Invalid values containing tags
+        invalid_values = [
+            '<img src="test"/>',
+            '<a href="#">Link</a>',
+            "<a href='#'>Link</a>",
+            '<b>',
+        ]
+
+        for v in invalid_values:
+            response = self.patch(
+                url,
+                {
+                    'description': v
+                },
+                expected_code=400
+            )
+
+            self.assertIn('Remove HTML tags', str(response.data))
+
+        # Raw characters should be allowed
+        allowed = [
+            '<< hello',
+            'Alpha & Omega',
+            'A > B > C',
+        ]
+
+        for val in allowed:
+            response = self.patch(
+                url,
+                {
+                    'description': val,
+                },
+                expected_code=200,
+            )
+
+            self.assertEqual(response.data['description'], val)
+
+    def test_invisible_chars(self):
+        """Test that invisible characters are removed from the input data"""
+
+        url = reverse('api-part-category-detail', kwargs={'pk': 1})
+
+        values = [
+            'A part\n category\n\t',
+            'A\t part\t category\t',
+            'A pa\rrt cat\r\r\regory',
+            'A part\u200e catego\u200fry\u202e'
+        ]
+
+        for val in values:
+
+            response = self.patch(
+                url,
+                {
+                    'description': val,
+                },
+                expected_code=200,
+            )
+
+            self.assertEqual(response.data['description'], 'A part category')
+
+    def test_category_delete(self):
+        """Test category deletion with different parameters"""
+
+        class Target(IntEnum):
+            move_subcategories_to_parent_move_parts_to_parent = 0,
+            move_subcategories_to_parent_delete_parts = 1,
+            delete_subcategories_move_parts_to_parent = 2,
+            delete_subcategories_delete_parts = 3,
+
+        for i in range(4):
+            delete_child_categories: bool = False
+            delete_parts: bool = False
+
+            if i == Target.move_subcategories_to_parent_delete_parts \
+                    or i == Target.delete_subcategories_delete_parts:
+                delete_parts = True
+            if i == Target.delete_subcategories_move_parts_to_parent \
+                    or i == Target.delete_subcategories_delete_parts:
+                delete_child_categories = True
+
+            # Create a parent category
+            parent_category = PartCategory.objects.create(
+                name='Parent category',
+                description='This is the parent category where the child categories and parts are moved to',
+                parent=None
+            )
+
+            category_count_before = PartCategory.objects.count()
+            part_count_before = Part.objects.count()
+
+            # Create a category to delete
+            cat_to_delete = PartCategory.objects.create(
+                name='Category to delete',
+                description='This is the category to be deleted',
+                parent=parent_category
+            )
+
+            url = reverse('api-part-category-detail', kwargs={'pk': cat_to_delete.id})
+
+            parts = []
+            # Create parts in the category to be deleted
+            for jj in range(3):
+                parts.append(Part.objects.create(
+                    name=f"Part xyz {jj}",
+                    description="Child part of the deleted category",
+                    category=cat_to_delete
+                ))
+
+            child_categories = []
+            child_categories_parts = []
+            # Create child categories under the category to be deleted
+            for ii in range(3):
+                child = PartCategory.objects.create(
+                    name=f"Child parent_cat {ii}",
+                    description="A child category of the deleted category",
+                    parent=cat_to_delete
+                )
+                child_categories.append(child)
+
+                # Create parts in the child categories
+                for jj in range(3):
+                    child_categories_parts.append(Part.objects.create(
+                        name=f"Part xyz {jj}",
+                        description="Child part in the child category of the deleted category",
+                        category=child
+                    ))
+
+            # Delete the created category (sub categories and their parts will be moved under the parent)
+            params = {}
+            if delete_parts:
+                params['delete_parts'] = '1'
+            if delete_child_categories:
+                params['delete_child_categories'] = '1'
+            response = self.delete(
+                url,
+                params,
+                expected_code=204,
+            )
+
+            self.assertEqual(response.status_code, 204)
+
+            if delete_parts:
+                if i == Target.delete_subcategories_delete_parts:
+                    # Check if all parts deleted
+                    self.assertEqual(Part.objects.count(), part_count_before)
+                elif i == Target.move_subcategories_to_parent_delete_parts:
+                    # Check if all parts deleted
+                    self.assertEqual(Part.objects.count(), part_count_before + len(child_categories_parts))
+            else:
+                # parts moved to the parent category
+                for part in parts:
+                    part.refresh_from_db()
+                    self.assertEqual(part.category, parent_category)
+
+                if delete_child_categories:
+                    for part in child_categories_parts:
+                        part.refresh_from_db()
+                        self.assertEqual(part.category, parent_category)
+
+            if delete_child_categories:
+                # Check if all categories are deleted
+                self.assertEqual(PartCategory.objects.count(), category_count_before)
+            else:
+                #  Check if all subcategories to parent moved to parent and all parts deleted
+                for child in child_categories:
+                    child.refresh_from_db()
+                    self.assertEqual(child.parent, parent_category)
+
+    def test_structural(self):
+        """Test the effectiveness of structural categories
+
+        Make sure:
+        - Parts cannot be created in structural categories
+        - Parts cannot be assigned to structural categories
+        """
+
+        # Create our structural part category
+        structural_category = PartCategory.objects.create(
+            name='Structural category',
+            description='This is the structural category',
+            parent=None,
+            structural=True
         )
 
-        cat = PartCategory.objects.get(pk=1)
+        part_count_before = Part.objects.count()
 
-        # Image tags have been stripped
-        self.assertEqual(cat.description, '&lt;img src=# onerror=alert("pwned")&gt;')
+        # Make sure that we get an error if we try to create part in the structural category
+        with self.assertRaises(ValidationError):
+            part = Part.objects.create(
+                name="Part which shall not be created",
+                description="-",
+                category=structural_category
+            )
 
-        self.patch(
-            url,
-            {
-                'description': '<a href="www.google.com">LINK</a><script>alert("h4x0r")</script>',
-            },
-            expected_code=200,
+        # Ensure that the part really did not get created in the structural category
+        self.assertEqual(part_count_before, Part.objects.count())
+
+        # Create a non structural category for test part category change
+        non_structural_category = PartCategory.objects.create(
+            name='Non-structural category',
+            description='This is a non-structural category',
+            parent=None,
+            structural=False
         )
 
-        # Tags must have been bleached out
-        cat.refresh_from_db()
+        # Create the test part assigned to a non-structural category
+        part = Part.objects.create(
+            name="Part which category will be changed to structural",
+            description="-",
+            category=non_structural_category
+        )
 
-        self.assertEqual(cat.description, '<a href="www.google.com">LINK</a>&lt;script&gt;alert("h4x0r")&lt;/script&gt;')
+        # Assign the test part to a structural category and make sure it gives an error
+        part.category = structural_category
+        with self.assertRaises(ValidationError):
+            part.save()
+
+        # Ensure that the part did not get saved to the DB
+        part.refresh_from_db()
+        self.assertEqual(part.category.pk, non_structural_category.pk)
 
 
 class PartOptionsAPITest(InvenTreeAPITestCase):
@@ -548,7 +756,7 @@ class PartAPITest(InvenTreeAPITestCase):
                 {
                     'convert_from': variant.pk,
                 },
-                expected_code=200
+                expected_code=200,
             )
 
             # There should be the same number of results for each request
@@ -1028,17 +1236,17 @@ class PartAPITest(InvenTreeAPITestCase):
         url = reverse('api-part-list')
 
         required_cols = [
-            'id',
-            'name',
-            'description',
-            'in_stock',
-            'category_name',
-            'keywords',
-            'is_template',
-            'virtual',
-            'trackable',
-            'active',
-            'notes',
+            'Part ID',
+            'Part Name',
+            'Part Description',
+            'In Stock',
+            'Category Name',
+            'Keywords',
+            'Template',
+            'Virtual',
+            'Trackable',
+            'Active',
+            'Notes',
             'creation_date',
         ]
 
@@ -1063,16 +1271,16 @@ class PartAPITest(InvenTreeAPITestCase):
             )
 
             for row in data:
-                part = Part.objects.get(pk=row['id'])
+                part = Part.objects.get(pk=row['Part ID'])
 
                 if part.IPN:
                     self.assertEqual(part.IPN, row['IPN'])
 
-                self.assertEqual(part.name, row['name'])
-                self.assertEqual(part.description, row['description'])
+                self.assertEqual(part.name, row['Part Name'])
+                self.assertEqual(part.description, row['Part Description'])
 
                 if part.category:
-                    self.assertEqual(part.category.name, row['category_name'])
+                    self.assertEqual(part.category.name, row['Category Name'])
 
 
 class PartDetailTests(InvenTreeAPITestCase):
@@ -1390,8 +1598,24 @@ class PartDetailTests(InvenTreeAPITestCase):
         self.assertFalse('hello' in part.metadata)
         self.assertEqual(part.metadata['x'], 'y')
 
-    def test_part_notes(self):
-        """Unit tests for the part 'notes' field"""
+
+class PartNotesTests(InvenTreeAPITestCase):
+    """Tests for the 'notes' field (markdown field)"""
+
+    fixtures = [
+        'category',
+        'part',
+        'location',
+        'company',
+    ]
+
+    roles = [
+        'part.change',
+        'part.add',
+    ]
+
+    def test_long_notes(self):
+        """Test that very long notes field is rejected"""
 
         # Ensure that we cannot upload a very long piece of text
         url = reverse('api-part-detail', kwargs={'pk': 1})
@@ -1405,6 +1629,86 @@ class PartDetailTests(InvenTreeAPITestCase):
         )
 
         self.assertIn('Ensure this field has no more than 50000 characters', str(response.data['notes']))
+
+    def test_multiline_formatting(self):
+        """Ensure that markdown formatting is retained"""
+
+        url = reverse('api-part-detail', kwargs={'pk': 1})
+
+        notes = """
+        ### Title
+
+        1. Numbered list
+        2. Another item
+        3. Another item again
+
+        [A link](http://link.com.go)
+
+        """
+
+        response = self.patch(
+            url,
+            {
+                'notes': notes,
+            },
+            expected_code=200
+        )
+
+        # Ensure that newline chars have not been removed
+        self.assertIn('\n', response.data['notes'])
+
+        # Entire notes field should match original value
+        self.assertEqual(response.data['notes'], notes.strip())
+
+
+class PartPricingDetailTests(InvenTreeAPITestCase):
+    """Tests for the part pricing API endpoint"""
+
+    fixtures = [
+        'category',
+        'part',
+        'location',
+    ]
+
+    roles = [
+        'part.change',
+    ]
+
+    def url(self, pk):
+        """Construct a pricing URL"""
+
+        return reverse('api-part-pricing', kwargs={'pk': pk})
+
+    def test_pricing_detail(self):
+        """Test an empty pricing detail"""
+
+        response = self.get(
+            self.url(1),
+            expected_code=200
+        )
+
+        # Check for expected fields
+        expected_fields = [
+            'currency',
+            'updated',
+            'bom_cost_min',
+            'bom_cost_max',
+            'purchase_cost_min',
+            'purchase_cost_max',
+            'internal_cost_min',
+            'internal_cost_max',
+            'supplier_price_min',
+            'supplier_price_max',
+            'overall_min',
+            'overall_max',
+        ]
+
+        for field in expected_fields:
+            self.assertIn(field, response.data)
+
+        # Empty fields (no pricing by default)
+        for field in expected_fields[2:]:
+            self.assertIsNone(response.data[field])
 
 
 class PartAPIAggregationTest(InvenTreeAPITestCase):
@@ -1634,6 +1938,110 @@ class PartAPIAggregationTest(InvenTreeAPITestCase):
         self.assertEqual(part.total_stock, 91)
         self.assertEqual(part.available_stock, 56)
 
+    def test_on_order(self):
+        """Test that the 'on_order' queryset annotation works as expected.
+
+        This queryset annotation takes into account any outstanding line items for active orders,
+        and should also use the 'pack_size' of the supplier part objects.
+        """
+
+        supplier = Company.objects.create(
+            name='Paint Supplies',
+            description='A supplier of paints',
+            is_supplier=True
+        )
+
+        # First, create some parts
+        paint = PartCategory.objects.create(
+            parent=None,
+            name="Paint",
+            description="Paints and such",
+        )
+
+        for color in ['Red', 'Green', 'Blue', 'Orange', 'Yellow']:
+            p = Part.objects.create(
+                category=paint,
+                units='litres',
+                name=f"{color} Paint",
+                description=f"Paint which is {color} in color"
+            )
+
+            # Create multiple supplier parts in different sizes
+            for pk_sz in [1, 10, 25, 100]:
+                sp = SupplierPart.objects.create(
+                    part=p,
+                    supplier=supplier,
+                    SKU=f"PNT-{color}-{pk_sz}L",
+                    pack_size=pk_sz,
+                )
+
+            self.assertEqual(p.supplier_parts.count(), 4)
+
+        # Check that we have the right base data to start with
+        self.assertEqual(paint.parts.count(), 5)
+        self.assertEqual(supplier.supplied_parts.count(), 20)
+
+        supplier_parts = supplier.supplied_parts.all()
+
+        # Create multiple orders
+        for _ii in range(5):
+
+            po = order.models.PurchaseOrder.objects.create(
+                supplier=supplier,
+                description='ordering some paint',
+            )
+
+            # Order an assortment of items
+            for sp in supplier_parts:
+
+                # Generate random quantity to order
+                quantity = randint(10, 20)
+
+                # Mark up to half of the quantity as received
+                received = randint(0, quantity // 2)
+
+                # Add a line item
+                item = order.models.PurchaseOrderLineItem.objects.create(
+                    part=sp,
+                    order=po,
+                    quantity=quantity,
+                    received=received,
+                )
+
+        # Now grab a list of parts from the API
+        response = self.get(
+            reverse('api-part-list'),
+            {
+                'category': paint.pk,
+            },
+            expected_code=200,
+        )
+
+        # Check that the correct number of items have been returned
+        self.assertEqual(len(response.data), 5)
+
+        for item in response.data:
+            # Calculate the 'ordering' quantity from first principles
+            p = Part.objects.get(pk=item['pk'])
+
+            on_order = 0
+
+            for sp in p.supplier_parts.all():
+                for line_item in sp.purchase_order_line_items.all():
+                    po = line_item.order
+
+                    if po.status in PurchaseOrderStatus.OPEN:
+                        remaining = line_item.quantity - line_item.received
+
+                        if remaining > 0:
+                            on_order += remaining * sp.pack_size
+
+            # The annotated quantity must be equal to the hand-calculated quantity
+            self.assertEqual(on_order, item['ordering'])
+
+            # The annotated quantity must also match the part.on_order quantity
+            self.assertEqual(on_order, p.on_order)
+
 
 class BomItemTest(InvenTreeAPITestCase):
     """Unit tests for the BomItem API."""
@@ -1705,7 +2113,7 @@ class BomItemTest(InvenTreeAPITestCase):
             data={
                 'validated': True,
             },
-            expected_code=200
+            expected_code=200,
         )
 
         # Check that the expected response is returned
@@ -2202,3 +2610,145 @@ class PartParameterTest(InvenTreeAPITestCase):
         data = response.data
 
         self.assertEqual(data['data'], '15')
+
+
+class PartAttachmentTest(InvenTreeAPITestCase):
+    """Unit tests for the PartAttachment API endpoint"""
+
+    fixtures = [
+        'category',
+        'part',
+        'location',
+    ]
+
+    def test_add_attachment(self):
+        """Test that we can create a new PartAttachment via the API"""
+
+        url = reverse('api-part-attachment-list')
+
+        # Upload without permission
+        response = self.post(
+            url,
+            {},
+            expected_code=403,
+        )
+
+        # Add required permission
+        self.assignRole('part.add')
+
+        # Upload without specifying part (will fail)
+        response = self.post(
+            url,
+            {
+                'comment': 'Hello world',
+            },
+            expected_code=400
+        )
+
+        self.assertIn('This field is required', str(response.data['part']))
+
+        # Upload without file OR link (will fail)
+        response = self.post(
+            url,
+            {
+                'part': 1,
+                'comment': 'Hello world',
+            },
+            expected_code=400
+        )
+
+        self.assertIn('Missing file', str(response.data['attachment']))
+        self.assertIn('Missing external link', str(response.data['link']))
+
+        # Upload an invalid link (will fail)
+        response = self.post(
+            url,
+            {
+                'part': 1,
+                'link': 'not-a-link.py',
+            },
+            expected_code=400
+        )
+
+        self.assertIn('Enter a valid URL', str(response.data['link']))
+
+        link = 'https://www.google.com/test'
+
+        # Upload a valid link (will pass)
+        response = self.post(
+            url,
+            {
+                'part': 1,
+                'link': link,
+                'comment': 'Hello world',
+            },
+            expected_code=201
+        )
+
+        data = response.data
+
+        self.assertEqual(data['part'], 1)
+        self.assertEqual(data['link'], link)
+        self.assertEqual(data['comment'], 'Hello world')
+
+
+class PartInternalPriceBreakTest(InvenTreeAPITestCase):
+    """Unit tests for the PartInternalPrice API endpoints"""
+
+    fixtures = [
+        'category',
+        'part',
+        'params',
+        'location',
+        'bom',
+        'company',
+        'test_templates',
+        'manufacturer_part',
+        'supplier_part',
+        'order',
+        'stock',
+    ]
+
+    roles = [
+        'part.change',
+        'part.add',
+        'part.delete',
+        'part_category.change',
+        'part_category.add',
+        'part_category.delete',
+    ]
+
+    def test_create_price_breaks(self):
+        """Test we can create price breaks at various quantities"""
+
+        url = reverse('api-part-internal-price-list')
+
+        breaks = [
+            (1.0, 101),
+            (1.1, 92.555555555),
+            (1.5, 90.999999999),
+            (1.756, 89),
+            (2, 86),
+            (25, 80)
+        ]
+
+        for q, p in breaks:
+            data = self.post(
+                url,
+                {
+                    'part': 1,
+                    'quantity': q,
+                    'price': p,
+                },
+                expected_code=201
+            ).data
+
+            self.assertEqual(data['part'], 1)
+            self.assertEqual(
+                round(Decimal(data['quantity']), 4),
+                round(Decimal(q), 4)
+            )
+            self.assertEqual(
+                round(Decimal(data['price']), 4),
+                round(Decimal(p), 4)
+            )

@@ -5,7 +5,7 @@ from django.urls import reverse
 from rest_framework import serializers
 
 from common.models import (InvenTreeSetting, InvenTreeUserSetting,
-                           NotificationMessage)
+                           NewsFeedEntry, NotificationMessage)
 from InvenTree.helpers import construct_absolute_url, get_objectreference
 from InvenTree.serializers import InvenTreeModelSerializer
 
@@ -70,6 +70,7 @@ class GlobalSettingsSerializer(SettingsSerializer):
             'choices',
             'model_name',
             'api_url',
+            'typ',
         ]
 
 
@@ -93,6 +94,7 @@ class UserSettingsSerializer(SettingsSerializer):
             'choices',
             'model_name',
             'api_url',
+            'typ',
         ]
 
 
@@ -122,6 +124,7 @@ class GenericReferencedSettingSerializer(SettingsSerializer):
                 'choices',
                 'model_name',
                 'api_url',
+                'typ',
             ]
 
         # set Meta class
@@ -155,7 +158,7 @@ class NotificationMessageSerializer(InvenTreeModelSerializer):
 
     age_human = serializers.CharField(read_only=True)
 
-    read = serializers.BooleanField(read_only=True)
+    read = serializers.BooleanField()
 
     def get_target(self, obj):
         """Function to resolve generic object reference to target."""
@@ -200,11 +203,22 @@ class NotificationMessageSerializer(InvenTreeModelSerializer):
         ]
 
 
-class NotificationReadSerializer(NotificationMessageSerializer):
-    """Serializer for reading a notification."""
+class NewsFeedEntrySerializer(InvenTreeModelSerializer):
+    """Serializer for the NewsFeedEntry model."""
 
-    def is_valid(self, raise_exception=False):
-        """Ensure instance data is available for view and let validation pass."""
-        self.instance = self.context['instance']  # set instance that should be returned
-        self._validated_data = True
-        return True
+    read = serializers.BooleanField()
+
+    class Meta:
+        """Meta options for NewsFeedEntrySerializer."""
+
+        model = NewsFeedEntry
+        fields = [
+            'pk',
+            'feed_id',
+            'title',
+            'link',
+            'published',
+            'author',
+            'summary',
+            'read',
+        ]

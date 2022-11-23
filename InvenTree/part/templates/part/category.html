@@ -1,6 +1,7 @@
 {% extends "part/part_app_base.html" %}
 {% load static %}
 {% load i18n %}
+{% load inventree_extras %}
 
 {% block sidebar %}
 {% include 'part/category_sidebar.html' %}
@@ -12,14 +13,19 @@
 
 {% block heading %}
 {% if category %}
-{% trans "Part Category" %}: {{ category.name }}
+{% trans "Part Category" %}:
+{% settings_value "PART_CATEGORY_DEFAULT_ICON" as default_icon %}
+{% if category.icon or default_icon %}
+<span class="{{ category.icon|default:default_icon }}"></span>
+{% endif %}
+{{ category.name }}
 {% else %}
 {% trans "Parts" %}
 {% endif %}
 {% endblock %}
 
 {% block actions %}
-{% if user.is_staff and roles.part_category.change %}
+{% if category and user.is_staff and roles.part_category.change %}
 {% url 'admin:part_partcategory_change' category.pk as url %}
 {% include "admin_button.html" with url=url %}
 {% endif %}
@@ -56,11 +62,6 @@
     </ul>
 </div>
 {% endif %}
-{% endif %}
-{% if roles.part_category.add %}
-<button class='btn btn-success' id='cat-create' title='{% trans "Create new part category" %}'>
-    <span class='fas fa-plus-circle'></span> {% trans "New Category" %}
-</button>
 {% endif %}
 {% endblock %}
 
@@ -219,7 +220,17 @@
 
 <div class='panel panel-hidden' id='panel-subcategories'>
     <div class='panel-heading'>
-        <h4>{% trans "Subcategories" %}</h4>
+        <div class='d-flex flex-wrap'>
+            <h4>{% trans "Subcategories" %}</h4>
+            {% include "spacer.html" %}
+            <div class='btn-group' role='group'>
+                {% if roles.part_category.add %}
+                <button class='btn btn-success' id='cat-create' title='{% trans "Create new part category" %}'>
+                    <span class='fas fa-plus-circle'></span> {% trans "New Category" %}
+                </button>
+                {% endif %}
+            </div>
+        </div>
     </div>
     <div class='panel-content'>
         <div id='subcategory-button-toolbar'>
@@ -288,7 +299,8 @@
             node.href = `/part/category/${node.pk}/`;
 
             return node;
-        }
+        },
+        defaultIcon: global_settings.PART_CATEGORY_DEFAULT_ICON,
     });
 
     onPanelLoad('subcategories', function() {

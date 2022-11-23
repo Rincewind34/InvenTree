@@ -79,6 +79,18 @@ function getAvailableTableFilters(tableKey) {
                 type: 'bool',
                 title: '{% trans "Allow Variant Stock" %}',
             },
+            optional: {
+                type: 'bool',
+                title: '{% trans "Optional" %}',
+            },
+            consumable: {
+                type: 'bool',
+                title: '{% trans "Consumable" %}',
+            },
+            has_pricing: {
+                type: 'bool',
+                title: '{% trans "Has Pricing" %}',
+            },
         };
     }
 
@@ -490,7 +502,11 @@ function getAvailableTableFilters(tableKey) {
             virtual: {
                 type: 'bool',
                 title: '{% trans "Virtual" %}',
-            }
+            },
+            has_pricing: {
+                type: 'bool',
+                title: '{% trans "Has Pricing" %}',
+            },
         };
     }
 

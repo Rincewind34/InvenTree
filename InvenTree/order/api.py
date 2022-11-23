@@ -1,10 +1,13 @@
 """JSON API for the Order app."""
 
+from django.db import transaction
 from django.db.models import F, Q
 from django.urls import include, path, re_path
+from django.utils.translation import gettext_lazy as _
 
 from django_filters import rest_framework as rest_filters
 from rest_framework import filters, status
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
 import order.models as models
@@ -116,12 +119,48 @@ class PurchaseOrderList(APIDownloadMixin, ListCreateAPI):
 
     def create(self, request, *args, **kwargs):
         """Save user information on create."""
-        serializer = self.get_serializer(data=self.clean_data(request.data))
+
+        data = self.clean_data(request.data)
+
+        duplicate_order = data.pop('duplicate_order', None)
+        duplicate_line_items = str2bool(data.pop('duplicate_line_items', False))
+        duplicate_extra_lines = str2bool(data.pop('duplicate_extra_lines', False))
+
+        if duplicate_order is not None:
+            try:
+                duplicate_order = models.PurchaseOrder.objects.get(pk=duplicate_order)
+            except (ValueError, models.PurchaseOrder.DoesNotExist):
+                raise ValidationError({
+                    'duplicate_order': [_('No matching purchase order found')],
+                })
+
+        serializer = self.get_serializer(data=data)
         serializer.is_valid(raise_exception=True)
 
-        item = serializer.save()
-        item.created_by = request.user
-        item.save()
+        with transaction.atomic():
+            order = serializer.save()
+            order.created_by = request.user
+            order.save()
+
+            # Duplicate line items from other order if required
+            if duplicate_order is not None:
+
+                if duplicate_line_items:
+                    for line in duplicate_order.lines.all():
+                        # Copy the line across to the new order
+                        line.pk = None
+                        line.order = order
+                        line.received = 0
+
+                        line.save()
+
+                if duplicate_extra_lines:
+                    for line in duplicate_order.extra_lines.all():
+                        # Copy the line across to the new order
+                        line.pk = None
+                        line.order = order
+
+                        line.save()
 
         headers = self.get_success_headers(serializer.data)
         return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
@@ -253,7 +292,7 @@ class PurchaseOrderList(APIDownloadMixin, ListCreateAPI):
         'status',
     ]
 
-    ordering = '-creation_date'
+    ordering = '-reference'
 
 
 class PurchaseOrderDetail(RetrieveUpdateDestroyAPI):
@@ -403,6 +442,19 @@ class PurchaseOrderLineItemFilter(rest_filters.FilterSet):
         else:
             # Only count "pending" orders
             queryset = queryset.exclude(q).filter(order__status__in=PurchaseOrderStatus.OPEN)
+
+        return queryset
+
+    has_pricing = rest_filters.BooleanFilter(label="Has Pricing", method='filter_has_pricing')
+
+    def filter_has_pricing(self, queryset, name, value):
+        """Filter by whether or not the line item has pricing information"""
+        value = str2bool(value)
+
+        if value:
+            queryset = queryset.exclude(purchase_price=None)
+        else:
+            queryset = queryset.filter(purchase_price=None)
 
         return queryset
 
@@ -694,7 +746,7 @@ class SalesOrderList(APIDownloadMixin, ListCreateAPI):
         'customer_reference',
     ]
 
-    ordering = '-creation_date'
+    ordering = '-reference'
 
 
 class SalesOrderDetail(RetrieveUpdateDestroyAPI):
@@ -737,6 +789,22 @@ class SalesOrderLineItemFilter(rest_filters.FilterSet):
             'part',
         ]
 
+    has_pricing = rest_filters.BooleanFilter(label="Has Pricing", method='filter_has_pricing')
+
+    def filter_has_pricing(self, queryset, name, value):
+        """Filter by whether or not the line item has pricing information"""
+
+        value = str2bool(value)
+
+        if value:
+            queryset = queryset.exclude(sale_price=None)
+        else:
+            queryset = queryset.filter(sale_price=None)
+
+        return queryset
+
+    order_status = rest_filters.NumberFilter(label='Order Status', field_name='order__status')
+
     completed = rest_filters.BooleanFilter(label='completed', method='filter_completed')
 
     def filter_completed(self, queryset, name, value):
@@ -771,6 +839,8 @@ class SalesOrderLineItemList(ListCreateAPI):
             kwargs['part_detail'] = str2bool(params.get('part_detail', False))
             kwargs['order_detail'] = str2bool(params.get('order_detail', False))
             kwargs['allocations'] = str2bool(params.get('allocations', False))
+            kwargs['customer_detail'] = str2bool(params.get('customer_detail', False))
+
         except AttributeError:
             pass
 
@@ -812,11 +882,6 @@ class SalesOrderLineItemList(ListCreateAPI):
         'part__name',
         'quantity',
         'reference',
-    ]
-
-    filterset_fields = [
-        'order',
-        'part',
     ]
 
 

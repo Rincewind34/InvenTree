@@ -9,6 +9,7 @@ from django.core.cache import cache
 from django.http.response import StreamingHttpResponse
 from django.test import TestCase
 from django.urls import reverse
+from django.utils.safestring import SafeString
 
 from PIL import Image
 
@@ -27,6 +28,19 @@ class ReportTagTest(TestCase):
     def debug_mode(self, value: bool):
         """Enable or disable debug mode for reports"""
         InvenTreeSetting.set_setting('REPORT_DEBUG_MODE', value, change_user=None)
+
+    def test_getkey(self):
+        """Tests for the 'getkey' template tag"""
+
+        data = {
+            'hello': 'world',
+            'foo': 'bar',
+            'with spaces': 'withoutspaces',
+            1: 2,
+        }
+
+        for k, v in data.items():
+            self.assertEqual(report_tags.getkey(data, k), v)
 
     def test_asset(self):
         """Tests for asset files"""
@@ -47,6 +61,10 @@ class ReportTagTest(TestCase):
 
         self.debug_mode(True)
         asset = report_tags.asset('test.txt')
+        self.assertEqual(asset, '/media/report/assets/test.txt')
+
+        # Ensure that a 'safe string' also works
+        asset = report_tags.asset(SafeString('test.txt'))
         self.assertEqual(asset, '/media/report/assets/test.txt')
 
         self.debug_mode(False)
@@ -87,8 +105,15 @@ class ReportTagTest(TestCase):
         img = report_tags.uploaded_image('part/images/test.jpg')
         self.assertEqual(img, '/media/part/images/test.jpg')
 
+        # Ensure that a 'safe string' also works
+        img = report_tags.uploaded_image(SafeString('part/images/test.jpg'))
+        self.assertEqual(img, '/media/part/images/test.jpg')
+
         self.debug_mode(False)
         img = report_tags.uploaded_image('part/images/test.jpg')
+        self.assertEqual(img, f'file://{img_path.joinpath("test.jpg")}')
+
+        img = report_tags.uploaded_image(SafeString('part/images/test.jpg'))
         self.assertEqual(img, f'file://{img_path.joinpath("test.jpg")}')
 
     def test_part_image(self):
@@ -293,6 +318,7 @@ class TestReportTest(ReportTest):
         InvenTreeSetting.set_setting('REPORT_ATTACH_TEST_REPORT', True, None)
 
         response = self.get(url, {'item': item.pk}, expected_code=200)
+
         headers = response.headers
         self.assertEqual(headers['Content-Type'], 'application/pdf')
 

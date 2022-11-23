@@ -4,6 +4,7 @@ import logging
 import os
 import sys
 from datetime import date, datetime
+from decimal import Decimal
 
 from django import template
 from django.conf import settings as djangosettings
@@ -13,10 +14,13 @@ from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
 
+import moneyed.localization
+
 import InvenTree.helpers
 from common.models import ColorTheme, InvenTreeSetting, InvenTreeUserSetting
 from common.settings import currency_code_default
 from InvenTree import settings, version
+from plugin import registry
 from plugin.models import NotificationUserSetting, PluginSetting
 
 register = template.Library()
@@ -34,6 +38,12 @@ def define(value, *args, **kwargs):
     Ref: https://stackoverflow.com/questions/1070398/how-to-set-a-value-of-a-variable-inside-a-template-code
     """
     return value
+
+
+@register.simple_tag()
+def decimal(x, *args, **kwargs):
+    """Simplified rendering of a decimal number."""
+    return InvenTree.helpers.decimal2string(x)
 
 
 @register.simple_tag(takes_context=True)
@@ -93,10 +103,34 @@ def render_date(context, date_object):
     return date_object
 
 
-@register.simple_tag()
-def decimal(x, *args, **kwargs):
-    """Simplified rendering of a decimal number."""
-    return InvenTree.helpers.decimal2string(x)
+@register.simple_tag
+def render_currency(money, decimal_places=None, include_symbol=True):
+    """Render a currency / Money object"""
+
+    if money is None or money.amount is None:
+        return '-'
+
+    if decimal_places is None:
+        decimal_places = InvenTreeSetting.get_setting('PRICING_DECIMAL_PLACES', 6)
+
+    value = Decimal(str(money.amount)).normalize()
+    value = str(value)
+
+    if '.' in value:
+        decimals = len(value.split('.')[-1])
+
+        decimals = max(decimals, 2)
+        decimals = min(decimals, decimal_places)
+
+        decimal_places = decimals
+    else:
+        decimal_places = 2
+
+    return moneyed.localization.format_money(
+        money,
+        decimal_places=decimal_places,
+        include_symbol=include_symbol,
+    )
 
 
 @register.simple_tag()
@@ -150,6 +184,25 @@ def plugins_enabled(*args, **kwargs):
 
 
 @register.simple_tag()
+def plugins_info(*args, **kwargs):
+    """Return information about activated plugins."""
+    # Check if plugins are even enabled
+    if not djangosettings.PLUGINS_ENABLED:
+        return False
+
+    # Fetch plugins
+    plug_list = [plg for plg in registry.plugins.values() if plg.plugin_config().active]
+    # Format list
+    return [
+        {
+            'name': plg.name,
+            'slug': plg.slug,
+            'version': plg.version
+        } for plg in plug_list
+    ]
+
+
+@register.simple_tag()
 def inventree_db_engine(*args, **kwargs):
     """Return the InvenTree database backend e.g. 'postgresql'."""
     db = djangosettings.DATABASES['default']
@@ -175,12 +228,19 @@ def inventree_title(*args, **kwargs):
 
 @register.simple_tag()
 def inventree_logo(**kwargs):
-    """Return the InvenTree logo, *or* a custom logo if the user has uploaded one.
+    """Return the InvenTree logo, *or* a custom logo if the user has provided one.
 
     Returns a path to an image file, which can be rendered in the web interface
     """
 
     return InvenTree.helpers.getLogoImage(**kwargs)
+
+
+@register.simple_tag()
+def inventree_splash(**kwargs):
+    """Return the URL for the InvenTree splash screen, *or* a custom screen if the user has provided one."""
+
+    return InvenTree.helpers.getSplashScren(**kwargs)
 
 
 @register.simple_tag()

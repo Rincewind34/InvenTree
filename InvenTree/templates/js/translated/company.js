@@ -16,11 +16,13 @@
     deleteManufacturerParts,
     deleteManufacturerPartParameters,
     deleteSupplierParts,
+    duplicateSupplierPart,
     editCompany,
     loadCompanyTable,
     loadManufacturerPartTable,
     loadManufacturerPartParameterTable,
     loadSupplierPartTable,
+    loadSupplierPriceBreakTable,
 */
 
 
@@ -130,7 +132,8 @@ function supplierPartFields(options={}) {
         },
         packaging: {
             icon: 'fa-box',
-        }
+        },
+        pack_size: {},
     };
 
     if (options.part) {
@@ -198,6 +201,39 @@ function createSupplierPart(options={}) {
 }
 
 
+/*
+ * Launch a modal form to duplicate an existing SupplierPart instance
+ */
+function duplicateSupplierPart(part, options={}) {
+
+    var fields = options.fields || supplierPartFields();
+
+    // Retrieve information for the supplied part
+    inventreeGet(`/api/company/part/${part}/`, {}, {
+        success: function(data) {
+
+            // Remove fields which we do not want to duplicate
+            delete data['pk'];
+            delete data['available'];
+            delete data['availability_updated'];
+
+            constructForm(`/api/company/part/`, {
+                method: 'POST',
+                fields: fields,
+                title: '{% trans "Duplicate Supplier Part" %}',
+                data: data,
+                onSuccess: function(response) {
+                    handleFormSuccess(response, options);
+                }
+            });
+        }
+    });
+}
+
+
+/*
+ * Launch a modal form to edit an existing SupplierPart instance
+ */
 function editSupplierPart(part, options={}) {
 
     var fields = options.fields || supplierPartFields();
@@ -865,6 +901,7 @@ function loadSupplierPartTable(table, url, options) {
                 switchable: params['part_detail'],
                 sortable: true,
                 field: 'part_detail.full_name',
+                sortName: 'part',
                 title: '{% trans "Part" %}',
                 formatter: function(value, row) {
 
@@ -915,6 +952,7 @@ function loadSupplierPartTable(table, url, options) {
                 visible: params['manufacturer_detail'],
                 switchable: params['manufacturer_detail'],
                 sortable: true,
+                sortName: 'manufacturer',
                 field: 'manufacturer_detail.name',
                 title: '{% trans "Manufacturer" %}',
                 formatter: function(value, row) {
@@ -933,6 +971,7 @@ function loadSupplierPartTable(table, url, options) {
                 visible: params['manufacturer_detail'],
                 switchable: params['manufacturer_detail'],
                 sortable: true,
+                sortName: 'MPN',
                 field: 'manufacturer_part_detail.MPN',
                 title: '{% trans "MPN" %}',
                 formatter: function(value, row) {
@@ -944,7 +983,32 @@ function loadSupplierPartTable(table, url, options) {
                 }
             },
             {
+                field: 'description',
+                title: '{% trans "Description" %}',
+                sortable: false,
+            },
+            {
+                field: 'packaging',
+                title: '{% trans "Packaging" %}',
+                sortable: true,
+            },
+            {
+                field: 'pack_size',
+                title: '{% trans "Pack Quantity" %}',
+                sortable: true,
+                formatter: function(value, row) {
+                    var output = `${value}`;
+
+                    if (row.part_detail && row.part_detail.units) {
+                        output += ` ${row.part_detail.units}`;
+                    }
+
+                    return output;
+                }
+            },
+            {
                 field: 'link',
+                sortable: false,
                 title: '{% trans "Link" %}',
                 formatter: function(value) {
                     if (value) {
@@ -955,18 +1019,8 @@ function loadSupplierPartTable(table, url, options) {
                 }
             },
             {
-                field: 'description',
-                title: '{% trans "Description" %}',
-                sortable: false,
-            },
-            {
                 field: 'note',
                 title: '{% trans "Notes" %}',
-                sortable: false,
-            },
-            {
-                field: 'packaging',
-                title: '{% trans "Packaging" %}',
                 sortable: false,
             },
             {
@@ -976,7 +1030,7 @@ function loadSupplierPartTable(table, url, options) {
             },
             {
                 field: 'available',
-                title: '{% trans "Available" %}',
+                title: '{% trans "Availability" %}',
                 sortable: true,
                 formatter: function(value, row) {
                     if (row.availability_updated) {
@@ -1037,5 +1091,99 @@ function loadSupplierPartTable(table, url, options) {
                 );
             });
         }
+    });
+}
+
+
+/*
+ * Load a table of supplier price break data
+ */
+function loadSupplierPriceBreakTable(options={}) {
+
+    var table = options.table || $('#price-break-table');
+
+    // Setup button callbacks once table is loaded
+    function setupCallbacks() {
+        table.find('.button-price-break-delete').click(function() {
+            var pk = $(this).attr('pk');
+
+            constructForm(`/api/company/price-break/${pk}/`, {
+                method: 'DELETE',
+                title: '{% trans "Delete Price Break" %}',
+                onSuccess: function() {
+                    table.bootstrapTable('refresh');
+                },
+            });
+        });
+
+        table.find('.button-price-break-edit').click(function() {
+            var pk = $(this).attr('pk');
+
+            constructForm(`/api/company/price-break/${pk}/`, {
+                fields: {
+                    quantity: {},
+                    price: {},
+                    price_currency: {},
+                },
+                title: '{% trans "Edit Price Break" %}',
+                onSuccess: function() {
+                    table.bootstrapTable('refresh');
+                }
+            });
+        });
+    }
+
+    setupFilterList('supplierpricebreak', table, '#filter-list-supplierpricebreak');
+
+    table.inventreeTable({
+        name: 'buypricebreaks',
+        url: '{% url "api-part-supplier-price-list" %}',
+        queryParams: {
+            part: options.part,
+        },
+        formatNoMatches: function() {
+            return '{% trans "No price break information found" %}';
+        },
+        onPostBody: function() {
+            setupCallbacks();
+        },
+        columns: [
+            {
+                field: 'pk',
+                title: 'ID',
+                visible: false,
+                switchable: false,
+            },
+            {
+                field: 'quantity',
+                title: '{% trans "Quantity" %}',
+                sortable: true,
+            },
+            {
+                field: 'price',
+                title: '{% trans "Price" %}',
+                sortable: true,
+                formatter: function(value, row, index) {
+                    return formatCurrency(value, {
+                        currency: row.price_currency
+                    });
+                }
+            },
+            {
+                field: 'updated',
+                title: '{% trans "Last updated" %}',
+                sortable: true,
+                formatter: function(value, row) {
+                    var html = renderDate(value);
+
+                    html += `<div class='btn-group float-right' role='group'>`;
+                    html += makeIconButton('fa-edit icon-blue', 'button-price-break-edit', row.pk, '{% trans "Edit price break" %}');
+                    html += makeIconButton('fa-trash-alt icon-red', 'button-price-break-delete', row.pk, '{% trans "Delete price break" %}');
+                    html += `</div>`;
+
+                    return html;
+                }
+            },
+        ]
     });
 }

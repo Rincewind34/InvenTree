@@ -24,12 +24,15 @@
     cancelPurchaseOrder,
     cancelSalesOrder,
     completePurchaseOrder,
+    completeSalesOrder,
     completeShipment,
     completePendingShipments,
     createPurchaseOrder,
     createPurchaseOrderLineItem,
     createSalesOrder,
     createSalesOrderShipment,
+    duplicatePurchaseOrder,
+    editPurchaseOrder,
     editPurchaseOrderLineItem,
     exportOrder,
     issuePurchaseOrder,
@@ -280,6 +283,17 @@ function completePurchaseOrder(order_id, options={}) {
             method: 'POST',
             title: '{% trans "Complete Purchase Order" %}',
             confirm: true,
+            fieldsFunction: function(opts) {
+                var fields = {
+                    accept_incomplete: {},
+                };
+
+                if (opts.context.is_complete) {
+                    delete fields['accept_incomplete'];
+                }
+
+                return fields;
+            },
             preFormContent: function(opts) {
 
                 var html = `
@@ -360,6 +374,59 @@ function issuePurchaseOrder(order_id, options={}) {
                 <div class='alert alert-block alert-warning'>
                 {% trans 'After placing this purchase order, line items will no longer be editable.' %}
                 </div>`;
+
+                return html;
+            },
+            onSuccess: function(response) {
+                handleFormSuccess(response, options);
+            }
+        }
+    );
+}
+
+
+/*
+ * Launches a modal form to mark a SalesOrder as "complete"
+ */
+function completeSalesOrder(order_id, options={}) {
+
+    constructForm(
+        `/api/order/so/${order_id}/complete/`,
+        {
+            method: 'POST',
+            title: '{% trans "Complete Sales Order" %}',
+            confirm: true,
+            fieldsFunction: function(opts) {
+                var fields = {
+                    accept_incomplete: {},
+                };
+
+                if (opts.context.is_complete) {
+                    delete fields['accept_incomplete'];
+                }
+
+                return fields;
+            },
+            preFormContent: function(opts) {
+                var html = `
+                <div class='alert alert-block alert-info'>
+                    {% trans "Mark this order as complete?" %}
+                </div>`;
+
+                if (opts.context.pending_shipments) {
+                    html += `
+                    <div class='alert alert-block alert-danger'>
+                    {% trans "Order cannot be completed as there are incomplete shipments" %}<br>
+                    </div>`;
+                }
+
+                if (!opts.context.is_complete) {
+                    html += `
+                    <div class='alert alert-block alert-warning'>
+                    {% trans "This order has line items which have not been completed." %}<br>
+                    {% trans "Completing this order means that the order and line items will no longer be editable." %}
+                    </div>`;
+                }
 
                 return html;
             },
@@ -493,41 +560,123 @@ function createSalesOrder(options={}) {
     });
 }
 
+
+/*
+ * Construct a set of fields for a purchase order form
+ */
+function purchaseOrderFields(options={}) {
+
+    var fields = {
+        reference: {
+            icon: 'fa-hashtag',
+        },
+        supplier: {
+            icon: 'fa-building',
+            secondary: {
+                title: '{% trans "Add Supplier" %}',
+                fields: function() {
+                    var fields = companyFormFields();
+
+                    fields.is_supplier.value = true;
+
+                    return fields;
+                }
+            }
+        },
+        description: {},
+        supplier_reference: {},
+        target_date: {
+            icon: 'fa-calendar-alt',
+        },
+        link: {
+            icon: 'fa-link',
+        },
+        responsible: {
+            icon: 'fa-user',
+        },
+    };
+
+    if (options.supplier) {
+        fields.supplier.value = options.supplier;
+    }
+
+    if (options.hide_supplier) {
+        fields.supplier.hidden = true;
+    }
+
+    // Add fields for order duplication (only if required)
+    if (options.duplicate_order) {
+        fields.duplicate_order = {
+            value: options.duplicate_order,
+            group: 'duplicate',
+            required: 'true',
+            type: 'related field',
+            model: 'purchaseorder',
+            filters: {
+                supplier_detail: true,
+            },
+            api_url: '{% url "api-po-list" %}',
+            label: '{% trans "Purchase Order" %}',
+            help_text: '{% trans "Select purchase order to duplicate" %}',
+        };
+
+        fields.duplicate_line_items = {
+            value: true,
+            group: 'duplicate',
+            type: 'boolean',
+            label: '{% trans "Duplicate Line Items" %}',
+            help_text: '{% trans "Duplicate all line items from the selected order" %}',
+        };
+
+        fields.duplicate_extra_lines = {
+            value: true,
+            group: 'duplicate',
+            type: 'boolean',
+            label: '{% trans "Duplicate Extra Lines" %}',
+            help_text: '{% trans "Duplicate extra line items from the selected order" %}',
+        };
+    }
+
+    return fields;
+}
+
+
+/*
+ * Edit an existing PurchaseOrder
+ */
+function editPurchaseOrder(pk, options={}) {
+
+    var fields = purchaseOrderFields(options);
+
+    constructForm(`/api/order/po/${pk}/`, {
+        fields: fields,
+        title: '{% trans "Edit Purchase Order" %}',
+        onSuccess: function(response) {
+            handleFormSuccess(response, options);
+        }
+    });
+}
+
+
 // Create a new PurchaseOrder
 function createPurchaseOrder(options={}) {
 
+    var fields = purchaseOrderFields(options);
+
+    var groups = {};
+
+    if (options.duplicate_order) {
+        groups.duplicate = {
+            title: '{% trans "Duplication Options" %}',
+            collapsible: false,
+        };
+    };
+
     constructForm('{% url "api-po-list" %}', {
         method: 'POST',
-        fields: {
-            reference: {
-                icon: 'fa-hashtag',
-            },
-            supplier: {
-                icon: 'fa-building',
-                value: options.supplier,
-                secondary: {
-                    title: '{% trans "Add Supplier" %}',
-                    fields: function() {
-                        var fields = companyFormFields();
-
-                        fields.is_supplier.value = true;
-
-                        return fields;
-                    }
-                }
-            },
-            description: {},
-            supplier_reference: {},
-            target_date: {
-                icon: 'fa-calendar-alt',
-            },
-            link: {
-                icon: 'fa-link',
-            },
-            responsible: {
-                icon: 'fa-user',
-            }
-        },
+        fields: fields,
+        groups: groups,
+        data: options.data,
         onSuccess: function(data) {
 
             if (options.onSuccess) {
@@ -537,7 +686,29 @@ function createPurchaseOrder(options={}) {
                 location.href = `/order/purchase-order/${data.pk}/`;
             }
         },
-        title: '{% trans "Create Purchase Order" %}',
+        title: options.title || '{% trans "Create Purchase Order" %}',
+    });
+}
+
+/*
+ * Duplicate an existing PurchaseOrder
+ * Provides user with option to duplicate line items for the order also.
+ */
+function duplicatePurchaseOrder(order_id, options={}) {
+
+    options.duplicate_order = order_id;
+
+    inventreeGet(`/api/order/po/${order_id}/`, {}, {
+        success: function(data) {
+
+            // Clear out data we do not want to be duplicated
+            delete data['pk'];
+            delete data['reference'];
+
+            options.data = data;
+
+            createPurchaseOrder(options);
+        }
     });
 }
 
@@ -623,6 +794,69 @@ function poLineItemFields(options={}) {
                 supplier_detail: true,
                 supplier: options.supplier,
             },
+            onEdit: function(value, name, field, opts) {
+                // If the pack_size != 1, add a note to the field
+                var pack_size = 1;
+                var units = '';
+                var supplier_part_id = value;
+                var quantity = getFormFieldValue('quantity', {}, opts);
+
+                // Remove any existing note fields
+                $(opts.modal).find('#info-pack-size').remove();
+
+                if (value == null) {
+                    return;
+                }
+
+                // Request information about the particular supplier part
+                inventreeGet(`/api/company/part/${value}/`,
+                    {
+                        part_detail: true,
+                    },
+                    {
+                        success: function(response) {
+                            // Extract information from the returned query
+                            pack_size = response.pack_size || 1;
+                            units = response.part_detail.units || '';
+                        },
+                    }
+                ).then(function() {
+                    // Update pack size information
+                    if (pack_size != 1) {
+                        var txt = `<span class='fas fa-info-circle icon-blue'></span> {% trans "Pack Quantity" %}: ${pack_size} ${units}`;
+                        $(opts.modal).find('#hint_id_quantity').after(`<div class='form-info-message' id='info-pack-size'>${txt}</div>`);
+                    }
+                }).then(function() {
+                    // Update pricing data (if available)
+                    inventreeGet(
+                        '{% url "api-part-supplier-price-list" %}',
+                        {
+                            part: supplier_part_id,
+                            ordering: 'quantity',
+                        },
+                        {
+                            success: function(response) {
+                                // Returned prices are in increasing order of quantity
+                                if (response.length > 0) {
+                                    var idx = 0;
+
+                                    for (var idx = 0; idx < response.length; idx++) {
+                                        if (response[idx].quantity > quantity) {
+                                            break;
+                                        }
+
+                                        index = idx;
+                                    }
+
+                                    // Update price and currency data in the form
+                                    updateFieldValue('purchase_price', response[index].price, {}, opts);
+                                    updateFieldValue('purchase_price_currency', response[index].price_currency, {}, opts);
+                                }
+                            }
+                        }
+                    );
+                });
+            },
             secondary: {
                 method: 'POST',
                 title: '{% trans "Add Supplier Part" %}',
@@ -654,7 +888,11 @@ function poLineItemFields(options={}) {
         purchase_price: {},
         purchase_price_currency: {},
         target_date: {},
-        destination: {},
+        destination: {
+            filters: {
+                structural: false,
+            }
+        },
         notes: {},
     };
 
@@ -980,16 +1218,46 @@ function orderParts(parts_list, options={}) {
         afterRender: function(fields, opts) {
             parts.forEach(function(part) {
 
+                var pk = part.pk;
+
                 // Filter by base part
-                supplier_part_filters.part = part.pk;
+                supplier_part_filters.part = pk;
 
                 if (part.manufacturer_part) {
                     // Filter by manufacturer part
                     supplier_part_filters.manufacturer_part = part.manufacturer_part;
                 }
 
-                // Configure the "supplier part" field
-                initializeRelatedField({
+                // Callback function when supplier part is changed
+                // This is used to update the "pack size" attribute
+                var onSupplierPartChanged = function(value, name, field, opts) {
+                    var pack_size = 1;
+                    var units = '';
+
+                    $(opts.modal).find(`#info-pack-size-${pk}`).remove();
+
+                    if (value != null) {
+                        inventreeGet(
+                            `/api/company/part/${value}/`,
+                            {
+                                part_detail: true,
+                            },
+                            {
+                                success: function(response) {
+                                    pack_size = response.pack_size || 1;
+                                    units = response.part_detail.units || '';
+                                }
+                            }
+                        ).then(function() {
+                            if (pack_size != 1) {
+                                var txt = `<span class='fas fa-info-circle icon-blue'></span> {% trans "Pack Quantity" %}: ${pack_size} ${units}`;
+                                $(opts.modal).find(`#id_quantity_${pk}`).after(`<div class='form-info-message' id='info-pack-size-${pk}'>${txt}</div>`);
+                            }
+                        });
+                    }
+                };
+
+                var supplier_part_field = {
                     name: `part_${part.pk}`,
                     model: 'supplierpart',
                     api_url: '{% url "api-supplier-part-list" %}',
@@ -998,10 +1266,15 @@ function orderParts(parts_list, options={}) {
                     auto_fill: true,
                     value: options.supplier_part,
                     filters: supplier_part_filters,
+                    onEdit: onSupplierPartChanged,
                     noResults: function(query) {
                         return '{% trans "No matching supplier parts" %}';
                     }
-                }, null, opts);
+                };
+
+                // Configure the "supplier part" field
+                initializeRelatedField(supplier_part_field, null, opts);
+                addFieldCallback(`part_${part.pk}`, supplier_part_field, opts);
 
                 // Configure the "purchase order" field
                 initializeRelatedField({
@@ -1223,6 +1496,20 @@ function receivePurchaseOrderItems(order_id, line_items, options={}) {
             </span>
         `;
 
+        var units = line_item.part_detail.units || '';
+        var pack_size = line_item.supplier_part_detail.pack_size || 1;
+        var pack_size_div = '';
+
+        var received = quantity * pack_size;
+
+        if (pack_size != 1) {
+            pack_size_div = `
+            <div class='alert alert-block alert-info'>
+                {% trans "Pack Quantity" %}: ${pack_size} ${units}<br>
+                {% trans "Received Quantity" %}: <span class='pack_received_quantity' id='items_received_quantity_${pk}'>${received}</span> ${units}
+            </div>`;
+        }
+
         // Quantity to Receive
         var quantity_input = constructField(
             `items_quantity_${pk}`,
@@ -1262,7 +1549,7 @@ function receivePurchaseOrderItems(order_id, line_items, options={}) {
         );
 
         // Hidden inputs below the "quantity" field
-        var quantity_input_group = `${quantity_input}<div class='collapse' id='div-batch-${pk}'>${batch_input}</div>`;
+        var quantity_input_group = `${quantity_input}${pack_size_div}<div class='collapse' id='div-batch-${pk}'>${batch_input}</div>`;
 
         if (line_item.part_detail.trackable) {
             quantity_input_group += `<div class='collapse' id='div-serials-${pk}'>${sn_input}</div>`;
@@ -1374,7 +1661,9 @@ function receivePurchaseOrderItems(order_id, line_items, options={}) {
     var table_entries = '';
 
     line_items.forEach(function(item) {
-        table_entries += renderLineItem(item);
+        if (item.received < item.quantity) {
+            table_entries += renderLineItem(item);
+        }
     });
 
     var html = ``;
@@ -1403,14 +1692,19 @@ function receivePurchaseOrderItems(order_id, line_items, options={}) {
     constructForm(`/api/order/po/${order_id}/receive/`, {
         method: 'POST',
         fields: {
-            location: {},
+            location: {
+                filters: {
+                    structural: false,
+                }
+            },
         },
         preFormContent: html,
         confirm: true,
         confirmMessage: '{% trans "Confirm receipt of items" %}',
         title: '{% trans "Receive Purchase Order Items" %}',
         afterRender: function(fields, opts) {
-            // Initialize the "destination" field for each item
+
+            // Run initialization routines for each line in the form
             line_items.forEach(function(item) {
 
                 var pk = item.pk;
@@ -1431,18 +1725,21 @@ function receivePurchaseOrderItems(order_id, line_items, options={}) {
                     render_description: false,
                 };
 
+                // Initialize the location field
                 initializeRelatedField(
                     field_details,
                     null,
                     opts,
                 );
 
+                // Add 'clear' button callback for the location field
                 addClearCallback(
                     name,
                     field_details,
                     opts
                 );
 
+                // Setup stock item status field
                 initializeChoiceField(
                     {
                         name: `items_status_${pk}`,
@@ -1450,6 +1747,19 @@ function receivePurchaseOrderItems(order_id, line_items, options={}) {
                     null,
                     opts
                 );
+
+                // Add change callback for quantity field
+                if (item.supplier_part_detail.pack_size != 1) {
+                    $(opts.modal).find(`#id_items_quantity_${pk}`).change(function() {
+                        var value = $(opts.modal).find(`#id_items_quantity_${pk}`).val();
+
+                        var el = $(opts.modal).find(`#quantity_${pk}`).find('.pack_received_quantity');
+
+                        var actual = value * item.supplier_part_detail.pack_size;
+                        actual = formatDecimal(actual);
+                        el.text(actual);
+                    });
+                }
             });
 
             // Add callbacks to remove rows
@@ -1816,6 +2126,11 @@ function loadPurchaseOrderLineItemTable(table, options={}) {
     options.params['order'] = options.order;
     options.params['part_detail'] = true;
 
+    // Override 'editing' if order is not pending
+    if (!options.pending && !global_settings.PURCHASEORDER_EDIT_COMPLETED_ORDERS) {
+        options.allow_edit = false;
+    }
+
     var filters = loadTableFilters('purchaseorderlineitem');
 
     for (var key in options.params) {
@@ -1987,6 +2302,23 @@ function loadPurchaseOrderLineItemTable(table, options={}) {
                 switchable: false,
                 field: 'quantity',
                 title: '{% trans "Quantity" %}',
+                formatter: function(value, row) {
+                    var units = '';
+
+                    if (row.part_detail.units) {
+                        units = ` ${row.part_detail.units}`;
+                    }
+
+                    var data = value;
+
+                    if (row.supplier_part_detail.pack_size != 1.0) {
+                        var pack_size = row.supplier_part_detail.pack_size;
+                        var total = value * pack_size;
+                        data += `<span class='fas fa-info-circle icon-blue float-right' title='{% trans "Pack Quantity" %}: ${pack_size}${units} - {% trans "Total Quantity" %}: ${total}${units}'></span>`;
+                    }
+
+                    return data;
+                },
                 footerFormatter: function(data) {
                     return data.map(function(row) {
                         return +row['quantity'];
@@ -1996,18 +2328,28 @@ function loadPurchaseOrderLineItemTable(table, options={}) {
                 }
             },
             {
+                sortable: false,
+                switchable: true,
+                field: 'supplier_part_detail.pack_size',
+                title: '{% trans "Pack Quantity" %}',
+                formatter: function(value, row) {
+                    var units = row.part_detail.units;
+
+                    if (units) {
+                        value += ` ${units}`;
+                    }
+
+                    return value;
+                }
+            },
+            {
                 sortable: true,
                 field: 'purchase_price',
                 title: '{% trans "Unit Price" %}',
                 formatter: function(value, row) {
-                    var formatter = new Intl.NumberFormat(
-                        'en-US',
-                        {
-                            style: 'currency',
-                            currency: row.purchase_price_currency
-                        }
-                    );
-                    return formatter.format(row.purchase_price);
+                    return formatCurrency(row.purchase_price, {
+                        currency: row.purchase_price_currency,
+                    });
                 }
             },
             {
@@ -2015,14 +2357,9 @@ function loadPurchaseOrderLineItemTable(table, options={}) {
                 sortable: true,
                 title: '{% trans "Total Price" %}',
                 formatter: function(value, row) {
-                    var formatter = new Intl.NumberFormat(
-                        'en-US',
-                        {
-                            style: 'currency',
-                            currency: row.purchase_price_currency
-                        }
-                    );
-                    return formatter.format(row.purchase_price * row.quantity);
+                    return formatCurrency(row.purchase_price * row.quantity, {
+                        currency: row.purchase_price_currency
+                    });
                 },
                 footerFormatter: function(data) {
                     var total = data.map(function(row) {
@@ -2033,15 +2370,9 @@ function loadPurchaseOrderLineItemTable(table, options={}) {
 
                     var currency = (data.slice(-1)[0] && data.slice(-1)[0].purchase_price_currency) || 'USD';
 
-                    var formatter = new Intl.NumberFormat(
-                        'en-US',
-                        {
-                            style: 'currency',
-                            currency: currency
-                        }
-                    );
-
-                    return formatter.format(total);
+                    return formatCurrency(total, {
+                        currency: currency
+                    });
                 }
             },
             {
@@ -2145,6 +2476,10 @@ function loadPurchaseOrderExtraLineTable(table, options={}) {
 
     options.table = table;
 
+    if (!options.pending && !global_settings.PURCHASEORDER_EDIT_COMPLETED_ORDERS) {
+        options.allow_edit = false;
+    }
+
     options.params = options.params || {};
 
     if (!options.order) {
@@ -2173,9 +2508,6 @@ function loadPurchaseOrderExtraLineTable(table, options={}) {
 
     setupFilterList('purchaseorderextraline', $(table), filter_target);
 
-    // Is the order pending?
-    var pending = options.status == {{ SalesOrderStatus.PENDING }};
-
     // Table columns to display
     var columns = [
         {
@@ -2202,15 +2534,9 @@ function loadPurchaseOrderExtraLineTable(table, options={}) {
             field: 'price',
             title: '{% trans "Unit Price" %}',
             formatter: function(value, row) {
-                var formatter = new Intl.NumberFormat(
-                    'en-US',
-                    {
-                        style: 'currency',
-                        currency: row.price_currency
-                    }
-                );
-
-                return formatter.format(row.price);
+                return formatCurrency(row.price, {
+                    currency: row.price_currency,
+                });
             }
         },
         {
@@ -2218,15 +2544,9 @@ function loadPurchaseOrderExtraLineTable(table, options={}) {
             sortable: true,
             title: '{% trans "Total Price" %}',
             formatter: function(value, row) {
-                var formatter = new Intl.NumberFormat(
-                    'en-US',
-                    {
-                        style: 'currency',
-                        currency: row.price_currency
-                    }
-                );
-
-                return formatter.format(row.price * row.quantity);
+                return formatCurrency(row.price * row.quantity, {
+                    currency: row.price_currency,
+                });
             },
             footerFormatter: function(data) {
                 var total = data.map(function(row) {
@@ -2237,15 +2557,9 @@ function loadPurchaseOrderExtraLineTable(table, options={}) {
 
                 var currency = (data.slice(-1)[0] && data.slice(-1)[0].price_currency) || 'USD';
 
-                var formatter = new Intl.NumberFormat(
-                    'en-US',
-                    {
-                        style: 'currency',
-                        currency: currency
-                    }
-                );
-
-                return formatter.format(total);
+                return formatCurrency(total, {
+                    currency: currency,
+                });
             }
         }
     ];
@@ -2255,26 +2569,26 @@ function loadPurchaseOrderExtraLineTable(table, options={}) {
         title: '{% trans "Notes" %}',
     });
 
-    if (pending) {
-        columns.push({
-            field: 'buttons',
-            switchable: false,
-            formatter: function(value, row, index, field) {
+    columns.push({
+        field: 'buttons',
+        switchable: false,
+        formatter: function(value, row, index, field) {
 
-                var html = `<div class='btn-group float-right' role='group'>`;
+            var html = `<div class='btn-group float-right' role='group'>`;
 
-                var pk = row.pk;
+            var pk = row.pk;
 
+            if (options.allow_edit) {
                 html += makeIconButton('fa-clone', 'button-duplicate', pk, '{% trans "Duplicate line" %}');
                 html += makeIconButton('fa-edit icon-blue', 'button-edit', pk, '{% trans "Edit line" %}');
                 html += makeIconButton('fa-trash-alt icon-red', 'button-delete', pk, '{% trans "Delete line" %}', );
-
-                html += `</div>`;
-
-                return html;
             }
-        });
-    }
+
+            html += `</div>`;
+
+            return html;
+        }
+    });
 
     function reloadTable() {
         $(table).bootstrapTable('refresh');
@@ -2465,7 +2779,7 @@ function loadSalesOrderTable(table, options) {
             return `<div id='purchase-order-calendar'></div>`;
         },
         onRefresh: function() {
-            loadPurchaseOrderTable(table, options);
+            loadSalesOrderTable(table, options);
         },
         onLoadSuccess: function() {
 
@@ -3426,7 +3740,7 @@ function reloadTotal() {
         {},
         {
             success: function(data) {
-                $(TotalPriceRef).html(data.total_price_string);
+                $(TotalPriceRef).html(formatCurrency(data.price, {currency: data.price_currency}));
             }
         }
     );
@@ -3444,6 +3758,10 @@ function reloadTotal() {
 function loadSalesOrderLineItemTable(table, options={}) {
 
     options.table = table;
+
+    if (!options.pending && !global_settings.SALESORDER_EDIT_COMPLETED_ORDERS) {
+        options.allow_edit = false;
+    }
 
     options.params = options.params || {};
 
@@ -3474,7 +3792,7 @@ function loadSalesOrderLineItemTable(table, options={}) {
     setupFilterList('salesorderlineitem', $(table), filter_target);
 
     // Is the order pending?
-    var pending = options.status == {{ SalesOrderStatus.PENDING }};
+    var pending = options.pending;
 
     // Has the order shipped?
     var shipped = options.status == {{ SalesOrderStatus.SHIPPED }};
@@ -3541,15 +3859,9 @@ function loadSalesOrderLineItemTable(table, options={}) {
             field: 'sale_price',
             title: '{% trans "Unit Price" %}',
             formatter: function(value, row) {
-                var formatter = new Intl.NumberFormat(
-                    'en-US',
-                    {
-                        style: 'currency',
-                        currency: row.sale_price_currency
-                    }
-                );
-
-                return formatter.format(row.sale_price);
+                return formatCurrency(row.sale_price, {
+                    currency: row.sale_price_currency
+                });
             }
         },
         {
@@ -3557,15 +3869,9 @@ function loadSalesOrderLineItemTable(table, options={}) {
             sortable: true,
             title: '{% trans "Total Price" %}',
             formatter: function(value, row) {
-                var formatter = new Intl.NumberFormat(
-                    'en-US',
-                    {
-                        style: 'currency',
-                        currency: row.sale_price_currency
-                    }
-                );
-
-                return formatter.format(row.sale_price * row.quantity);
+                return formatCurrency(row.sale_price * row.quantity, {
+                    currency: row.sale_price_currency,
+                });
             },
             footerFormatter: function(data) {
                 var total = data.map(function(row) {
@@ -3576,15 +3882,9 @@ function loadSalesOrderLineItemTable(table, options={}) {
 
                 var currency = (data.slice(-1)[0] && data.slice(-1)[0].sale_price_currency) || 'USD';
 
-                var formatter = new Intl.NumberFormat(
-                    'en-US',
-                    {
-                        style: 'currency',
-                        currency: currency
-                    }
-                );
-
-                return formatter.format(total);
+                return formatCurrency(total, {
+                    currency: currency,
+                });
             }
         },
         {
@@ -3992,6 +4292,10 @@ function loadSalesOrderExtraLineTable(table, options={}) {
 
     options.table = table;
 
+    if (!options.pending && !global_settings.SALESORDER_EDIT_COMPLETED_ORDERS) {
+        options.allow_edit = false;
+    }
+
     options.params = options.params || {};
 
     if (!options.order) {
@@ -4020,9 +4324,6 @@ function loadSalesOrderExtraLineTable(table, options={}) {
 
     setupFilterList('salesorderextraline', $(table), filter_target);
 
-    // Is the order pending?
-    var pending = options.status == {{ SalesOrderStatus.PENDING }};
-
     // Table columns to display
     var columns = [
         {
@@ -4049,15 +4350,9 @@ function loadSalesOrderExtraLineTable(table, options={}) {
             field: 'price',
             title: '{% trans "Unit Price" %}',
             formatter: function(value, row) {
-                var formatter = new Intl.NumberFormat(
-                    'en-US',
-                    {
-                        style: 'currency',
-                        currency: row.price_currency
-                    }
-                );
-
-                return formatter.format(row.price);
+                return formatCurrency(row.price, {
+                    currency: row.price_currency,
+                });
             }
         },
         {
@@ -4065,15 +4360,9 @@ function loadSalesOrderExtraLineTable(table, options={}) {
             sortable: true,
             title: '{% trans "Total Price" %}',
             formatter: function(value, row) {
-                var formatter = new Intl.NumberFormat(
-                    'en-US',
-                    {
-                        style: 'currency',
-                        currency: row.price_currency
-                    }
-                );
-
-                return formatter.format(row.price * row.quantity);
+                return formatCurrency(row.price * row.quantity, {
+                    currency: row.price_currency,
+                });
             },
             footerFormatter: function(data) {
                 var total = data.map(function(row) {
@@ -4084,15 +4373,9 @@ function loadSalesOrderExtraLineTable(table, options={}) {
 
                 var currency = (data.slice(-1)[0] && data.slice(-1)[0].price_currency) || 'USD';
 
-                var formatter = new Intl.NumberFormat(
-                    'en-US',
-                    {
-                        style: 'currency',
-                        currency: currency
-                    }
-                );
-
-                return formatter.format(total);
+                return formatCurrency(total, {
+                    currency: currency,
+                });
             }
         }
     ];
@@ -4102,26 +4385,24 @@ function loadSalesOrderExtraLineTable(table, options={}) {
         title: '{% trans "Notes" %}',
     });
 
-    if (pending) {
-        columns.push({
-            field: 'buttons',
-            switchable: false,
-            formatter: function(value, row, index, field) {
+    columns.push({
+        field: 'buttons',
+        switchable: false,
+        formatter: function(value, row, index, field) {
 
-                var html = `<div class='btn-group float-right' role='group'>`;
+            var html = `<div class='btn-group float-right' role='group'>`;
 
+            if (options.allow_edit) {
                 var pk = row.pk;
-
                 html += makeIconButton('fa-clone', 'button-duplicate', pk, '{% trans "Duplicate line" %}');
                 html += makeIconButton('fa-edit icon-blue', 'button-edit', pk, '{% trans "Edit line" %}');
                 html += makeIconButton('fa-trash-alt icon-red', 'button-delete', pk, '{% trans "Delete line" %}', );
-
-                html += `</div>`;
-
-                return html;
             }
-        });
-    }
+
+            html += `</div>`;
+            return html;
+        }
+    });
 
     function reloadTable() {
         $(table).bootstrapTable('refresh');

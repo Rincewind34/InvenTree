@@ -101,9 +101,10 @@ InvenTree is designed to be **extensible**, and provides multiple options for **
 <details>
 <summary>DevOps</summary>
   <ul>
-    <li><a href="https://www.docker.com/">Docker</a></li>
-    <li><a href="https://crowdin.com/">Crowdin</a></li>
-    <li><a href="https://coveralls.io/">Coveralls</a></li>
+    <li><a href="https://hub.docker.com/r/inventree/inventree">Docker</a></li>
+    <li><a href="https://crowdin.com/project/inventree">Crowdin</a></li>
+    <li><a href="https://coveralls.io/github/inventree/InvenTree">Coveralls</a></li>
+    <li><a href="https://packager.io/gh/inventree/InvenTree">Packager.io</a></li>
   </ul>
 </details>
 
@@ -131,10 +132,13 @@ There are several options to deploy InvenTree.
 <div align="center"><h4>
     <a href="https://inventree.readthedocs.io/en/latest/start/docker/">Docker</a>
     <span> · </span>
-    <a href="https://marketplace.digitalocean.com/apps/inventree?refcode=d6172576d014"><img src="https://www.deploytodo.com/do-btn-blue-ghost.svg" alt="Deploy to DO" width="auto" height="40" /></a>
-    <span> · </span>
     <a href="https://inventree.readthedocs.io/en/latest/start/install/">Bare Metal</a>
 </h4></div>
+
+Single line install - read [the docs](https://inventree.readthedocs.io/en/latest/start/installer/) for supported distros and details about the function:
+```bash
+wget -Nq https://raw.githubusercontent.com/InvenTree/InvenTree/master/contrib/install.sh && bash install.sh
+```
 
 <!-- Contributing -->
 ## :wave: Contributing

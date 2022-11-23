@@ -32,18 +32,16 @@
 {% include "InvenTree/settings/global.html" %}
 {% include "InvenTree/settings/login.html" %}
 {% include "InvenTree/settings/barcode.html" %}
-{% include "InvenTree/settings/currencies.html" %}
 {% include "InvenTree/settings/label.html" %}
 {% include "InvenTree/settings/report.html" %}
 {% include "InvenTree/settings/part.html" %}
+{% include "InvenTree/settings/pricing.html" %}
 {% include "InvenTree/settings/category.html" %}
 {% include "InvenTree/settings/stock.html" %}
 {% include "InvenTree/settings/build.html" %}
 {% include "InvenTree/settings/po.html" %}
 {% include "InvenTree/settings/so.html" %}
 
-{% plugins_enabled as plug %}
-{% if plug %}
 {% include "InvenTree/settings/plugin.html" %}
 {% plugin_list as pl_list %}
 {% for plugin_key, plugin in pl_list.items %}
@@ -51,7 +49,6 @@
         {% include "InvenTree/settings/plugin_settings.html" %}
     {% endif %}
 {% endfor %}
-{% endif %}
 
 {% endif %}
 
@@ -78,12 +75,12 @@ $('table').find('.boolean-setting').change(function() {
     // Global setting by default
     var url = `/api/settings/global/${setting}/`;
 
-    if (plugin) {
+    if (notification) {
+        url = `/api/settings/notification/${pk}/`;
+    } else if (plugin) {
         url = `/api/plugin/settings/${plugin}/${setting}/`;
     } else if (user) {
         url = `/api/settings/user/${setting}/`;
-    } else if (notification) {
-        url = `/api/settings/notification/${pk}/`;
     }
 
     inventreePut(
@@ -345,16 +342,23 @@ $("#param-table").inventreeTable({
         {
             field: 'name',
             title: '{% trans "Name" %}',
-            sortable: 'true',
+            sortable: true,
         },
         {
             field: 'units',
             title: '{% trans "Units" %}',
-            sortable: 'true',
+            sortable: true,
+            switchable: true,
+        },
+        {
+            field: 'description',
+            title: '{% trans "Description" %}',
+            sortable: false,
+            switchable: true,
         },
         {
             formatter: function(value, row, index, field) {
-                var bEdit = "<button title='{% trans "Edit Template" %}' class='template-edit btn btn-outline-secondary' type='button' pk='" + row.pk + "'><span class='fas fa-edit'></span></button>";
+                var bEdit = "<button title='{% trans "Edit Template" %}' class='template-edit btn btn-outline-secondary' type='button' pk='" + row.pk + "'><span class='fas fa-edit icon-green'></span></button>";
                 var bDel = "<button title='{% trans "Delete Template" %}' class='template-delete btn btn-outline-secondary' type='button' pk='" + row.pk + "'><span class='fas fa-trash-alt icon-red'></span></button>";
 
                 var html = "<div class='btn-group float-right' role='group'>" + bEdit + bDel + "</div>";
@@ -370,6 +374,7 @@ $("#new-param").click(function() {
         fields: {
             name: {},
             units: {},
+            description: {},
         },
         method: 'POST',
         title: '{% trans "Create Part Parameter Template" %}',
@@ -389,6 +394,7 @@ $("#param-table").on('click', '.template-edit', function() {
             fields: {
                 name: {},
                 units: {},
+                description: {},
             },
             title: '{% trans "Edit Part Parameter Template" %}',
             onSuccess: function() {

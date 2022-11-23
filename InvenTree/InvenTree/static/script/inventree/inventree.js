@@ -127,18 +127,13 @@ function inventreeDocReady() {
         loadBrandIcon($(this), $(this).attr('brand_name'));
     });
 
-    // Callback for "admin view" button
-    $('#admin-button, .admin-button').click(function() {
-        var url = $(this).attr('url');
-
-        location.href = url;
-    });
-
     // Display any cached alert messages
     showCachedAlerts();
 
     // start watcher
     startNotificationWatcher();
+
+    attachClipboard('.clip-btn');
 
     // always refresh when the focus returns
     $(document).focus(function(){
@@ -205,13 +200,12 @@ function enableDragAndDrop(element, url, options) {
                 formData,
                 {
                     success: function(data, status, xhr) {
-                        console.log('Uploaded file via drag-and-drop');
                         if (options.success) {
                             options.success(data, status, xhr);
                         }
                     },
                     error: function(xhr, status, error) {
-                        console.log('File upload failed');
+                        console.error('File upload failed');
                         if (options.error) {
                             options.error(xhr, status, error);
                         }
@@ -220,7 +214,7 @@ function enableDragAndDrop(element, url, options) {
                 }
             );
         } else {
-            console.log('Ignoring drag-and-drop event (not a file)');
+            console.warn('Ignoring drag-and-drop event (not a file)');
         }
     });
 }

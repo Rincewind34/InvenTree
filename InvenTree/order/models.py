@@ -24,13 +24,14 @@ from mptt.models import TreeForeignKey
 
 import InvenTree.helpers
 import InvenTree.ready
+import InvenTree.tasks
 import order.validators
 from common.notifications import InvenTreeNotificationBodies
 from common.settings import currency_code_default
 from company.models import Company, SupplierPart
 from InvenTree.exceptions import log_error
 from InvenTree.fields import (InvenTreeModelMoneyField, InvenTreeNotesField,
-                              RoundingDecimalField)
+                              InvenTreeURLField, RoundingDecimalField)
 from InvenTree.helpers import decimal2string, getSetting, notify_responsible
 from InvenTree.models import InvenTreeAttachment, ReferenceIndexingMixin
 from InvenTree.status_codes import (PurchaseOrderStatus, SalesOrderStatus,
@@ -81,7 +82,7 @@ class Order(MetadataMixin, ReferenceIndexingMixin):
 
     description = models.CharField(max_length=250, verbose_name=_('Description'), help_text=_('Order description'))
 
-    link = models.URLField(blank=True, verbose_name=_('Link'), help_text=_('Link to external page'))
+    link = InvenTreeURLField(blank=True, verbose_name=_('Link'), help_text=_('Link to external page'))
 
     creation_date = models.DateField(blank=True, null=True, verbose_name=_('Creation Date'))
 
@@ -248,6 +249,11 @@ class PurchaseOrder(Order):
     status = models.PositiveIntegerField(default=PurchaseOrderStatus.PENDING, choices=PurchaseOrderStatus.items(),
                                          help_text=_('Purchase order status'))
 
+    @property
+    def status_text(self):
+        """Return the text representation of the status field"""
+        return PurchaseOrderStatus.text(self.status)
+
     supplier = models.ForeignKey(
         Company, on_delete=models.SET_NULL,
         null=True,
@@ -306,6 +312,9 @@ class PurchaseOrder(Order):
             reference (str, optional): Reference to item. Defaults to ''.
             purchase_price (optional): Price of item. Defaults to None.
 
+        Returns:
+            The newly created PurchaseOrderLineItem instance
+
         Raises:
             ValidationError: quantity is smaller than 0
             ValidationError: quantity is not type int
@@ -333,11 +342,13 @@ class PurchaseOrder(Order):
                 quantity_new = line.quantity + quantity
                 line.quantity = quantity_new
                 supplier_price = supplier_part.get_price(quantity_new)
+
                 if line.purchase_price and supplier_price:
                     line.purchase_price = supplier_price / quantity_new
+
                 line.save()
 
-                return
+                return line
 
         line = PurchaseOrderLineItem(
             order=self,
@@ -348,6 +359,8 @@ class PurchaseOrder(Order):
         )
 
         line.save()
+
+        return line
 
     @transaction.atomic
     def place_order(self):
@@ -371,9 +384,20 @@ class PurchaseOrder(Order):
         if self.status == PurchaseOrderStatus.PLACED:
             self.status = PurchaseOrderStatus.COMPLETE
             self.complete_date = datetime.now().date()
+
             self.save()
 
+            # Schedule pricing update for any referenced parts
+            for line in self.lines.all():
+                if line.part and line.part.part:
+                    line.part.part.pricing.schedule_for_update()
+
             trigger_event('purchaseorder.completed', id=self.pk)
+
+    @property
+    def is_pending(self):
+        """Return True if the PurchaseOrder is 'pending'"""
+        return self.status == PurchaseOrderStatus.PENDING
 
     @property
     def is_overdue(self):
@@ -450,11 +474,11 @@ class PurchaseOrder(Order):
         notes = kwargs.get('notes', '')
 
         # Extract optional barcode field
-        barcode = kwargs.get('barcode', None)
+        barcode_hash = kwargs.get('barcode', None)
 
         # Prevent null values for barcode
-        if barcode is None:
-            barcode = ''
+        if barcode_hash is None:
+            barcode_hash = ''
 
         if self.status != PurchaseOrderStatus.PLACED:
             raise ValidationError(
@@ -475,6 +499,9 @@ class PurchaseOrder(Order):
         # Create a new stock item
         if line.part and quantity > 0:
 
+            # Take the 'pack_size' of the SupplierPart into account
+            pack_quantity = Decimal(quantity) * Decimal(line.part.pack_size)
+
             # Determine if we should individually serialize the items, or not
             if type(serials) is list and len(serials) > 0:
                 serialize = True
@@ -488,13 +515,13 @@ class PurchaseOrder(Order):
                     part=line.part.part,
                     supplier_part=line.part,
                     location=location,
-                    quantity=1 if serialize else quantity,
+                    quantity=1 if serialize else pack_quantity,
                     purchase_order=self,
                     status=status,
                     batch=batch_code,
                     serial=sn,
                     purchase_price=line.purchase_price,
-                    uid=barcode
+                    barcode_hash=barcode_hash
                 )
 
                 stock.save(add_note=False)
@@ -515,6 +542,7 @@ class PurchaseOrder(Order):
                 )
 
         # Update the number of parts received against the particular line item
+        # Note that this quantity does *not* take the pack_size into account, it is "number of packs"
         line.received += quantity
         line.save()
 
@@ -641,6 +669,11 @@ class SalesOrder(Order):
     status = models.PositiveIntegerField(default=SalesOrderStatus.PENDING, choices=SalesOrderStatus.items(),
                                          verbose_name=_('Status'), help_text=_('Purchase order status'))
 
+    @property
+    def status_text(self):
+        """Return the text representation of the status field"""
+        return SalesOrderStatus.text(self.status)
+
     customer_reference = models.CharField(max_length=64, blank=True, verbose_name=_('Customer Reference '), help_text=_("Customer order reference code"))
 
     target_date = models.DateField(
@@ -702,7 +735,7 @@ class SalesOrder(Order):
         """Check if this order is "shipped" (all line items delivered)."""
         return self.lines.count() > 0 and all([line.is_completed() for line in self.lines.all()])
 
-    def can_complete(self, raise_error=False):
+    def can_complete(self, raise_error=False, allow_incomplete_lines=False):
         """Test if this SalesOrder can be completed.
 
         Throws a ValidationError if cannot be completed.
@@ -720,7 +753,7 @@ class SalesOrder(Order):
             elif self.pending_shipment_count > 0:
                 raise ValidationError(_("Order cannot be completed as there are incomplete shipments"))
 
-            elif self.pending_line_count > 0:
+            elif not allow_incomplete_lines and self.pending_line_count > 0:
                 raise ValidationError(_("Order cannot be completed as there are incomplete line items"))
 
         except ValidationError as e:
@@ -732,9 +765,9 @@ class SalesOrder(Order):
 
         return True
 
-    def complete_order(self, user):
+    def complete_order(self, user, **kwargs):
         """Mark this order as "complete."""
-        if not self.can_complete():
+        if not self.can_complete(**kwargs):
             return False
 
         self.status = SalesOrderStatus.SHIPPED
@@ -742,6 +775,10 @@ class SalesOrder(Order):
         self.shipment_date = datetime.now()
 
         self.save()
+
+        # Schedule pricing update for any referenced parts
+        for line in self.lines.all():
+            line.part.pricing.schedule_for_update()
 
         trigger_event('salesorder.completed', id=self.pk)
 
@@ -932,7 +969,7 @@ class OrderExtraLine(OrderLineItem):
 
     price = InvenTreeModelMoneyField(
         max_digits=19,
-        decimal_places=4,
+        decimal_places=6,
         null=True, blank=True,
         allow_negative=True,
         verbose_name=_('Price'),
@@ -1012,7 +1049,7 @@ class PurchaseOrderLineItem(OrderLineItem):
 
     purchase_price = InvenTreeModelMoneyField(
         max_digits=19,
-        decimal_places=4,
+        decimal_places=6,
         null=True, blank=True,
         verbose_name=_('Purchase Price'),
         help_text=_('Unit purchase price'),
@@ -1118,7 +1155,7 @@ class SalesOrderLineItem(OrderLineItem):
 
     sale_price = InvenTreeModelMoneyField(
         max_digits=19,
-        decimal_places=4,
+        decimal_places=6,
         null=True, blank=True,
         verbose_name=_('Sale Price'),
         help_text=_('Unit sale price'),
@@ -1240,7 +1277,7 @@ class SalesOrderShipment(models.Model):
         help_text=_('Reference number for associated invoice'),
     )
 
-    link = models.URLField(
+    link = InvenTreeURLField(
         blank=True,
         verbose_name=_('Link'),
         help_text=_('Link to external page')

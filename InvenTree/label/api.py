@@ -67,9 +67,7 @@ class LabelPrintMixin:
         plugin = registry.get_plugin(plugin_key)
 
         if plugin:
-            config = plugin.plugin_config()
-
-            if config and config.active:
+            if plugin.is_active():
                 # Only return the plugin if it is enabled!
                 return plugin
             else:
@@ -158,16 +156,12 @@ class LabelPrintMixin:
 
             pages = []
 
-            if len(outputs) > 1:
-                # If more than one output is generated, merge them into a single file
-                for output in outputs:
-                    doc = output.get_document()
-                    for page in doc.pages:
-                        pages.append(page)
+            for output in outputs:
+                doc = output.get_document()
+                for page in doc.pages:
+                    pages.append(page)
 
-                pdf = outputs[0].get_document().copy(pages).write_pdf()
-            else:
-                pdf = outputs[0].get_document().write_pdf()
+            pdf = outputs[0].get_document().copy(pages).write_pdf()
 
             inline = common.models.InvenTreeUserSetting.get_setting('LABEL_INLINE', user=request.user)
 

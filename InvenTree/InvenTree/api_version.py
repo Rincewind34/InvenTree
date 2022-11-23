@@ -2,10 +2,64 @@
 
 
 # InvenTree API version
-INVENTREE_API_VERSION = 69
+INVENTREE_API_VERSION = 83
 
 """
 Increment this API version number whenever there is a significant change to the API that any clients need to know about
+
+v83 -> 2022-11-19 : https://github.com/inventree/InvenTree/pull/3949
+    - Add support for structural Stock locations
+
+v82 -> 2022-11-16 : https://github.com/inventree/InvenTree/pull/3931
+    - Add support for structural Part categories
+
+v81 -> 2022-11-08 : https://github.com/inventree/InvenTree/pull/3710
+    - Adds cached pricing information to Part API
+    - Adds cached pricing information to BomItem API
+    - Allows Part and BomItem list endpoints to be filtered by 'has_pricing'
+    - Remove calculated 'price_string' values from API endpoints
+    - Allows PurchaseOrderLineItem API endpoint to be filtered by 'has_pricing'
+    - Allows SalesOrderLineItem API endpoint to be filtered by 'has_pricing'
+    - Allows SalesOrderLineItem API endpoint to be filtered by 'order_status'
+    - Adds more information to SupplierPriceBreak serializer
+
+v80 -> 2022-11-07 : https://github.com/inventree/InvenTree/pull/3906
+    - Adds 'barcode_hash' to Part API serializer
+    - Adds 'barcode_hash' to StockLocation API serializer
+    - Adds 'barcode_hash' to SupplierPart API serializer
+
+v79 -> 2022-11-03 : https://github.com/inventree/InvenTree/pull/3895
+    - Add metadata to Company
+
+v78 -> 2022-10-25 : https://github.com/inventree/InvenTree/pull/3854
+    - Make PartCategory to be filtered by name and description
+
+v77 -> 2022-10-12 : https://github.com/inventree/InvenTree/pull/3772
+    - Adds model permission checks for barcode assignment actions
+
+v76 -> 2022-09-10 : https://github.com/inventree/InvenTree/pull/3640
+    - Refactor of barcode data on the API
+    - StockItem.uid renamed to StockItem.barcode_hash
+
+v75 -> 2022-09-05 : https://github.com/inventree/InvenTree/pull/3644
+    - Adds "pack_size" attribute to SupplierPart API serializer
+
+v74 -> 2022-08-28 : https://github.com/inventree/InvenTree/pull/3615
+    - Add confirmation field for completing PurchaseOrder if the order has incomplete lines
+    - Add confirmation field for completing SalesOrder if the order has incomplete lines
+
+v73 -> 2022-08-24 : https://github.com/inventree/InvenTree/pull/3605
+    - Add 'description' field to PartParameterTemplate model
+
+v72 -> 2022-08-18 : https://github.com/inventree/InvenTree/pull/3567
+    - Allow PurchaseOrder to be duplicated via the API
+
+v71 -> 2022-08-18 : https://github.com/inventree/InvenTree/pull/3564
+    - Updates to the "part scheduling" API endpoint
+
+v70 -> 2022-08-02 : https://github.com/inventree/InvenTree/pull/3451
+    - Adds a 'depth' parameter to the PartCategory list API
+    - Adds a 'depth' parameter to the StockLocation list API
 
 v69 -> 2022-08-01 : https://github.com/inventree/InvenTree/pull/3443
     - Updates the PartCategory list API:

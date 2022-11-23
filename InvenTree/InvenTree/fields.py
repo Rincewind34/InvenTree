@@ -4,9 +4,7 @@ import sys
 from decimal import Decimal
 
 from django import forms
-from django.core import validators
 from django.db import models as models
-from django.forms.fields import URLField as FormURLField
 from django.utils.translation import gettext_lazy as _
 
 from djmoney.forms.fields import MoneyField
@@ -16,33 +14,33 @@ from rest_framework.fields import URLField as RestURLField
 
 import InvenTree.helpers
 
-from .validators import allowable_url_schemes
+from .validators import AllowedURLValidator, allowable_url_schemes
 
 
 class InvenTreeRestURLField(RestURLField):
     """Custom field for DRF with custom scheme vaildators."""
     def __init__(self, **kwargs):
         """Update schemes."""
+
+        # Enforce 'max length' parameter in form validation
+        if 'max_length' not in kwargs:
+            kwargs['max_length'] = 200
+
         super().__init__(**kwargs)
         self.validators[-1].schemes = allowable_url_schemes()
-
-
-class InvenTreeURLFormField(FormURLField):
-    """Custom URL form field with custom scheme validators."""
-
-    default_validators = [validators.URLValidator(schemes=allowable_url_schemes())]
 
 
 class InvenTreeURLField(models.URLField):
     """Custom URL field which has custom scheme validators."""
 
-    validators = [validators.URLValidator(schemes=allowable_url_schemes())]
+    default_validators = [AllowedURLValidator()]
 
-    def formfield(self, **kwargs):
-        """Return a Field instance for this field."""
-        return super().formfield(**{
-            'form_class': InvenTreeURLFormField
-        })
+    def __init__(self, **kwargs):
+        """Initialization method for InvenTreeURLField"""
+
+        # Max length for InvenTreeURLField is set to 200
+        kwargs['max_length'] = 200
+        super().__init__(**kwargs)
 
 
 def money_kwargs():
@@ -69,6 +67,13 @@ class InvenTreeModelMoneyField(ModelMoneyField):
             # set defaults
             kwargs.update(money_kwargs())
 
+        # Default values (if not specified)
+        if 'max_digits' not in kwargs:
+            kwargs['max_digits'] = 19
+
+        if 'decimal_places' not in kwargs:
+            kwargs['decimal_places'] = 6
+
         # Set a minimum value validator
         validators = kwargs.get('validators', [])
 
@@ -91,12 +96,28 @@ class InvenTreeModelMoneyField(ModelMoneyField):
         kwargs['form_class'] = InvenTreeMoneyField
         return super().formfield(**kwargs)
 
+    def to_python(self, value):
+        """Convert value to python type."""
+        value = super().to_python(value)
+        return round_decimal(value, self.decimal_places)
+
+    def prepare_value(self, value):
+        """Override the 'prepare_value' method, to remove trailing zeros when displaying.
+
+        Why? It looks nice!
+        """
+        return round_decimal(value, self.decimal_places, normalize=True)
+
 
 class InvenTreeMoneyField(MoneyField):
     """Custom MoneyField for clean migrations while using dynamic currency settings."""
     def __init__(self, *args, **kwargs):
         """Override initial values with the real info from database."""
         kwargs.update(money_kwargs())
+
+        kwargs['max_digits'] = 19
+        kwargs['decimal_places'] = 6
+
         super().__init__(*args, **kwargs)
 
 
@@ -126,11 +147,16 @@ class DatePickerFormField(forms.DateField):
         )
 
 
-def round_decimal(value, places):
+def round_decimal(value, places, normalize=False):
     """Round value to the specified number of places."""
-    if value is not None:
-        # see https://docs.python.org/2/library/decimal.html#decimal.Decimal.quantize for options
-        return value.quantize(Decimal(10) ** -places)
+
+    if type(value) in [Decimal, float]:
+        value = round(value, places)
+
+        if normalize:
+            # Remove any trailing zeroes
+            value = InvenTree.helpers.normalize(value)
+
     return value
 
 
@@ -140,18 +166,14 @@ class RoundingDecimalFormField(forms.DecimalField):
     def to_python(self, value):
         """Convert value to python type."""
         value = super().to_python(value)
-        value = round_decimal(value, self.decimal_places)
-        return value
+        return round_decimal(value, self.decimal_places)
 
     def prepare_value(self, value):
         """Override the 'prepare_value' method, to remove trailing zeros when displaying.
 
         Why? It looks nice!
         """
-        if type(value) == Decimal:
-            return InvenTree.helpers.normalize(value)
-        else:
-            return value
+        return round_decimal(value, self.decimal_places, normalize=True)
 
 
 class RoundingDecimalField(models.DecimalField):
@@ -164,11 +186,8 @@ class RoundingDecimalField(models.DecimalField):
 
     def formfield(self, **kwargs):
         """Return a Field instance for this field."""
-        defaults = {
-            'form_class': RoundingDecimalFormField
-        }
 
-        defaults.update(kwargs)
+        kwargs['form_class'] = RoundingDecimalFormField
 
         return super().formfield(**kwargs)
 

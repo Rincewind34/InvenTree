@@ -98,7 +98,9 @@ var searchQueries = [];
 
 function searchTextChanged(event) {
 
-    searchText = $('#offcanvas-search').find('#search-input').val();
+    var text = $('#offcanvas-search').find('#search-input').val();
+
+    searchText = sanitizeInputString(text);
 
     clearTimeout(searchInputTimer);
     searchInputTimer = setTimeout(updateSearch, 250);
@@ -241,6 +243,22 @@ function updateSearch() {
             renderStockLocation,
             {
                 url: '/stock/location',
+            }
+        );
+    }
+
+    if (checkPermission('build') && user_settings.SEARCH_PREVIEW_SHOW_BUILD_ORDERS) {
+        // Search for matching build orders
+        addSearchQuery(
+            'build',
+            '{% trans "Build Orders" %}',
+            '{% url "api-build-list" %}',
+            {
+                part_detail: true,
+            },
+            renderBuild,
+            {
+                url: '/build',
             }
         );
     }
