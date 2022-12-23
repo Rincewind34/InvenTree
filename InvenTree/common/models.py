@@ -10,6 +10,7 @@ import hmac
 import json
 import logging
 import math
+import os
 import uuid
 from datetime import datetime, timedelta
 from enum import Enum
@@ -1214,6 +1215,13 @@ class InvenTreeSetting(BaseInvenTreeSetting):
             'validator': bool,
         },
 
+        'SERIAL_NUMBER_AUTOFILL': {
+            'name': _('Autofill Serial Numbers'),
+            'description': _('Autofill serial numbers in forms'),
+            'default': False,
+            'validator': bool,
+        },
+
         'STOCK_BATCH_CODE_TEMPLATE': {
             'name': _('Batch Code Template'),
             'description': _('Template for generating default batch codes for stock items'),
@@ -1371,7 +1379,7 @@ class InvenTreeSetting(BaseInvenTreeSetting):
         'PLUGIN_ON_STARTUP': {
             'name': _('Check plugins on startup'),
             'description': _('Check that all plugins are installed on startup - enable in container environments'),
-            'default': settings.DOCKER,
+            'default': str(os.getenv('INVENTREE_DOCKER', False)).lower() in ['1', 'true'],
             'validator': bool,
             'requires_restart': True,
         },
