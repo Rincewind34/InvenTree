@@ -1,0 +1,30 @@
+name: Keycomp's version of InvenTree
+
+on:
+  push:
+    branches: [ "release/keycomp" ]
+
+env:
+  REGISTRY: bbbbb.dyndns.org
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - name: Build the Docker image
+      run: docker build . --tag bbbbb.dyndns.org/serversetup/inventree:keycomp
+
+    - uses: docker/login-action@f054a8b539a109f9f41c372932f1ae047eff08c9
+      name: Log in to the Container registry
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ secrets.REG_USER }}
+        password: ${{ secrets.REG_PASS }}
+
+    - uses: docker/build-push-action@ad44023a93711e3deb337508980b4b5e9bcdc5dc
+      name: Build and push Docker image
+      with:
+        context: .
+        push: true
+        tags: bbbbb.dyndns.org/serversetup/inventree:keycomp
