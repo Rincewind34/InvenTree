@@ -3,11 +3,13 @@
 # -*- coding: utf-8 -*-
 from __future__ import unicode_literals
 
+import logging
 import sys
 import traceback
 
 from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db.utils import IntegrityError, OperationalError
 from django.utils.translation import gettext_lazy as _
 
 import rest_framework.views as drfviews
@@ -15,6 +17,8 @@ from error_report.models import Error
 from rest_framework import serializers
 from rest_framework.exceptions import ValidationError as DRFValidationError
 from rest_framework.response import Response
+
+logger = logging.getLogger('inventree')
 
 
 def log_error(path):
@@ -32,21 +36,43 @@ def log_error(path):
     if kind in settings.IGNORED_ERRORS:
         return
 
-    Error.objects.create(
-        kind=kind.__name__,
-        info=info,
-        data='\n'.join(traceback.format_exception(kind, info, data)),
-        path=path,
-    )
+    # Log error to stderr
+    logger.error(info)
+
+    try:
+        Error.objects.create(
+            kind=kind.__name__,
+            info=info,
+            data='\n'.join(traceback.format_exception(kind, info, data)),
+            path=path,
+        )
+    except (OperationalError, IntegrityError):
+        # Not much we can do if logging the error throws a db exception
+        pass
 
 
 def exception_handler(exc, context):
     """Custom exception handler for DRF framework.
 
     Ref: https://www.django-rest-framework.org/api-guide/exceptions/#custom-exception-handling
-    Catches any errors not natively handled by DRF, and re-throws as an error DRF can handle
+    Catches any errors not natively handled by DRF, and re-throws as an error DRF can handle.
+
+    If sentry error reporting is enabled, we will also provide the original exception to sentry.io
     """
     response = None
+
+    if settings.SENTRY_ENABLED and settings.SENTRY_DSN and not settings.DEBUG:
+        # Report this exception to sentry.io
+        from sentry_sdk import capture_exception
+
+        # The following types of errors are ignored, they are "expected"
+        do_not_report = [
+            DjangoValidationError,
+            DRFValidationError,
+        ]
+
+        if not any([isinstance(exc, err) for err in do_not_report]):
+            capture_exception(exc)
 
     # Catch any django validation error, and re-throw a DRF validation error
     if isinstance(exc, DjangoValidationError):

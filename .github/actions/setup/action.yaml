@@ -1,6 +1,6 @@
 name: 'Setup Enviroment'
 description: 'Setup the enviroment for general InvenTree tests'
-author: 'inventree'
+author: 'InvenTree'
 inputs:
     python:
         required: false
@@ -48,7 +48,7 @@ runs:
         if: ${{ inputs.python == 'true' }}
         shell: bash
         run: |
-          python3 -m pip install -U pip
+          python3 -m pip install pip==23.0.1
           pip3 install invoke wheel
       - name: Install Specific Python Dependencies
         if: ${{ inputs.pip-dependency }}
