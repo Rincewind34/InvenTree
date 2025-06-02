@@ -24,7 +24,7 @@ jobs:
     - uses: docker/build-push-action@ad44023a93711e3deb337508980b4b5e9bcdc5dc
       name: Build and push Docker image
       with:
-        context: .
+        context: ./contrib/container
         target: production
         push: true
         tags: bbbbb.dyndns.org/serversetup/inventree:keycomp
